@@ -25,6 +25,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'subr-x)
 (require 'seq)
 
@@ -447,14 +448,115 @@ Stops before a blank line or a construct that interrupts a paragraph."
             (setq lines (nthcdr n lines)))))))
     (nreverse nodes)))
 
+(defconst pretty-view-gfm--escapable "[]!\"#$%&'()*+,./:;<=>?@\\^_`{|}~-"
+  "Characters a backslash may escape.")
+
+(defun pretty-view-gfm--text (value)
+  "Return a text node holding VALUE, or nil when VALUE is empty."
+  (unless (string-empty-p value)
+    (list :type 'text :value value)))
+
+(defun pretty-view-gfm--code-span-at (string pos)
+  "Try to read a code span in STRING starting at POS.
+Return a cons of the node and the position after it, or nil."
+  (let* ((n (length string))
+         (open pos))
+    (while (and (< open n) (eq (aref string open) ?`))
+      (setq open (1+ open)))
+    (let* ((width (- open pos))
+           (fence (make-string width ?`))
+           (close (string-search fence string open)))
+      ;; The closing run must be exactly as long as the opening one.
+      (while (and close
+                  (< (+ close width) n)
+                  (eq (aref string (+ close width)) ?`))
+        (setq close (string-search fence string (1+ close))))
+      (when close
+        (let ((code (substring string open close)))
+          ;; Strip one leading and trailing space when both are present
+          ;; and the content is not all spaces.
+          (when (and (> (length code) 1)
+                     (string-prefix-p " " code)
+                     (string-suffix-p " " code)
+                     (not (string-match-p "\\`[ ]+\\'" code)))
+            (setq code (substring code 1 -1)))
+          (cons (list :type 'code-span :code code) (+ close width)))))))
+
+(defun pretty-view-gfm--parse-inlines (string)
+  "Parse STRING into a list of inline nodes."
+  (let ((nodes nil) (buf "") (i 0) (n (length string)))
+    (cl-flet ((flush ()
+                (when-let* ((node (pretty-view-gfm--text buf)))
+                  (push node nodes))
+                (setq buf "")))
+      (while (< i n)
+        (let ((c (aref string i)))
+          (cond
+           ;; Backslash escape, or a hard break at end of line.
+           ((eq c ?\\)
+            (cond
+             ((and (< (1+ i) n) (eq (aref string (1+ i)) ?\n))
+              (flush)
+              (push (list :type 'line-break) nodes)
+              (setq i (+ i 2)))
+             ((and (< (1+ i) n)
+                   (string-search (string (aref string (1+ i)))
+                                  pretty-view-gfm--escapable))
+              (setq buf (concat buf (string (aref string (1+ i)))))
+              (setq i (+ i 2)))
+             (t (setq buf (concat buf "\\"))
+                (setq i (1+ i)))))
+           ;; Code span.
+           ((eq c ?`)
+            (let ((result (pretty-view-gfm--code-span-at string i)))
+              (if result
+                  (progn (flush)
+                         (push (car result) nodes)
+                         (setq i (cdr result)))
+                (setq buf (concat buf "`"))
+                (setq i (1+ i)))))
+           ;; Hard break: two or more trailing spaces before a newline.
+           ((and (eq c ?\s)
+                 (string-match "\\` \\{2,\\}\n" (substring string i)))
+            (flush)
+            (push (list :type 'line-break) nodes)
+            (setq i (+ i (match-end 0))))
+           ;; Soft break.
+           ((eq c ?\n)
+            (flush)
+            (push (list :type 'soft-break) nodes)
+            (setq i (1+ i)))
+           (t (setq buf (concat buf (string c)))
+              (setq i (1+ i))))))
+      (flush))
+    (nreverse nodes)))
+
+(defun pretty-view-gfm--resolve-inlines (nodes)
+  "Return NODES with every `:raw' string replaced by parsed `:children'."
+  (mapcar
+   (lambda (node)
+     (let ((node (copy-sequence node)))
+       (when-let* ((raw (plist-get node :raw)))
+         (setq node (plist-put node :children
+                               (pretty-view-gfm--parse-inlines raw)))
+         (setq node (plist-put node :raw nil)))
+       (when-let* ((kids (plist-get node :children)))
+         ;; Inline nodes produced just above have no `:raw' and recurse
+         ;; harmlessly; block children are walked here.
+         (setq node (plist-put node :children
+                               (pretty-view-gfm--resolve-inlines kids))))
+       node))
+   nodes))
+
 (defun pretty-view-gfm-parse (string)
   "Parse STRING as GitHub Flavored Markdown and return a document node."
   (setq pretty-view-gfm--link-refs (make-hash-table :test #'equal))
-  (let ((lines (split-string (string-trim-right string "\n") "\n")))
+  (let* ((lines (split-string (string-trim-right string "\n") "\n"))
+         (blocks (if (equal lines '(""))
+                     nil
+                   (pretty-view-gfm--parse-blocks lines))))
     (list :type 'document
-          :children (if (equal lines '(""))
-                        nil
-                      (pretty-view-gfm--parse-blocks lines)))))
+          :children (pretty-view-gfm--resolve-inlines blocks))))
 
 (provide 'pretty-view-gfm)
 ;;; pretty-view-gfm.el ends here

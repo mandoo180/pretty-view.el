@@ -28,7 +28,7 @@
   (let ((node (pv-test-block "## Hello world")))
     (should (eq (pv-test-type node) 'heading))
     (should (= (plist-get node :level) 2))
-    (should (equal (plist-get node :raw) "Hello world"))
+    (should (equal (pv-test-text node) "Hello world"))
     (should (equal (plist-get node :id) "hello-world"))))
 
 (ert-deftest pretty-view-gfm-test-atx-heading-levels ()
@@ -43,24 +43,25 @@
   (should (eq (pv-test-type (pv-test-block "#hashtag")) 'paragraph)))
 
 (ert-deftest pretty-view-gfm-test-closing-sequence-stripped ()
-  (should (equal (plist-get (pv-test-block "## Hello ##") :raw) "Hello")))
+  (should (equal (pv-test-text (pv-test-block "## Hello ##")) "Hello")))
 
 (ert-deftest pretty-view-gfm-test-setext-heading ()
   (let ((node (pv-test-block "Title\n=====")))
     (should (eq (pv-test-type node) 'heading))
     (should (= (plist-get node :level) 1))
-    (should (equal (plist-get node :raw) "Title")))
+    (should (equal (pv-test-text node) "Title")))
   (should (= (plist-get (pv-test-block "Title\n-----") :level) 2)))
 
 (ert-deftest pretty-view-gfm-test-paragraph-joins-lines ()
   (let ((node (pv-test-block "one\ntwo")))
     (should (eq (pv-test-type node) 'paragraph))
-    (should (equal (plist-get node :raw) "one\ntwo"))))
+    (let ((kids (plist-get node :children)))
+      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
 
 (ert-deftest pretty-view-gfm-test-blank-line-separates-paragraphs ()
   (let ((blocks (pv-test-blocks "one\n\ntwo")))
     (should (= (length blocks) 2))
-    (should (equal (plist-get (nth 1 blocks) :raw) "two"))))
+    (should (equal (pv-test-text (nth 1 blocks)) "two"))))
 
 (ert-deftest pretty-view-gfm-test-thematic-break ()
   (dolist (s '("---" "***" "___" " - - -" "_____________"))
@@ -141,7 +142,7 @@
   (let ((node (pv-test-block "> quoted")))
     (should (eq (pv-test-type node) 'blockquote))
     (should (eq (pv-test-type (car (plist-get node :children))) 'paragraph))
-    (should (equal (plist-get (car (plist-get node :children)) :raw) "quoted"))))
+    (should (equal (pv-test-text (car (plist-get node :children))) "quoted"))))
 
 (ert-deftest pretty-view-gfm-test-blockquote-nested ()
   (let* ((outer (pv-test-block "> > deep"))
@@ -157,8 +158,8 @@
   "Lazy continuation is for paragraph text, and must keep working."
   (let ((node (pv-test-block "> a\nlazy text")))
     (should (eq (pv-test-type node) 'blockquote))
-    (should (equal (plist-get (car (plist-get node :children)) :raw)
-                   "a\nlazy text"))))
+    (let ((kids (plist-get (car (plist-get node :children)) :children)))
+      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
 
 (ert-deftest pretty-view-gfm-test-blockquote-interrupted-by-heading ()
   (let ((blocks (pv-test-blocks "> a\n# heading")))
@@ -213,7 +214,7 @@
     (should (eq (pv-test-type (nth 0 items)) 'task-item))
     (should-not (plist-get (nth 0 items) :checked))
     (should (plist-get (nth 1 items) :checked))
-    (should (equal (plist-get (car (plist-get (nth 0 items) :children)) :raw)
+    (should (equal (pv-test-text (car (plist-get (nth 0 items) :children)))
                    "todo"))))
 
 (ert-deftest pretty-view-gfm-test-task-list-uppercase-x ()
@@ -232,7 +233,7 @@
     (should (= (length rows) 2))
     (should (plist-get (nth 0 rows) :header))
     (should-not (plist-get (nth 1 rows) :header))
-    (should (equal (plist-get (nth 0 (plist-get (nth 0 rows) :children)) :raw)
+    (should (equal (pv-test-text (nth 0 (plist-get (nth 0 rows) :children)))
                    "a"))))
 
 (ert-deftest pretty-view-gfm-test-table-alignment ()
@@ -256,7 +257,7 @@
 (ert-deftest pretty-view-gfm-test-table-escaped-pipe-stays-in-cell ()
   (let* ((node (pv-test-block "| a |\n|---|\n| x \\| y |"))
          (cell (car (plist-get (nth 1 (plist-get node :children)) :children))))
-    (should (equal (plist-get cell :raw) "x | y"))))
+    (should (equal (pv-test-text cell) "x | y"))))
 
 (ert-deftest pretty-view-gfm-test-table-ends-at-blank-line ()
   (let ((blocks (pv-test-blocks "| a |\n|---|\n| 1 |\n\nafter")))
@@ -268,7 +269,7 @@
   (let ((blocks (pv-test-blocks "text\n| a | b |\n|---|---|\n| 1 | 2 |")))
     (should (= (length blocks) 2))
     (should (eq (pv-test-type (nth 0 blocks)) 'paragraph))
-    (should (equal (plist-get (nth 0 blocks) :raw) "text"))
+    (should (equal (pv-test-text (nth 0 blocks)) "text"))
     (should (eq (pv-test-type (nth 1 blocks)) 'table))))
 
 (ert-deftest pretty-view-gfm-test-html-block ()
@@ -304,13 +305,14 @@
   (let ((node (pv-test-block "[^a]: the note")))
     (should (eq (pv-test-type node) 'footnote-definition))
     (should (equal (plist-get node :label) "a"))
-    (should (equal (plist-get (car (plist-get node :children)) :raw)
+    (should (equal (pv-test-text (car (plist-get node :children)))
                    "the note"))))
 
 (ert-deftest pretty-view-gfm-test-footnote-definition-continuation ()
   (let* ((node (pv-test-block "[^a]: first\n    second"))
          (para (car (plist-get node :children))))
-    (should (equal (plist-get para :raw) "first\nsecond"))))
+    (let ((kids (plist-get para :children)))
+      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
 
 (ert-deftest pretty-view-gfm-test-footnote-is-not-a-link-reference ()
   (should (eq (pv-test-type (pv-test-block "[^a]: x")) 'footnote-definition)))
@@ -343,7 +345,60 @@
 (ert-deftest pretty-view-gfm-test-footnote-tab-continuation ()
   (let* ((node (pv-test-block "[^a]: first\n\tsecond"))
          (para (car (plist-get node :children))))
-    (should (equal (plist-get para :raw) "first\nsecond"))))
+    (let ((kids (plist-get para :children)))
+      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
+
+(ert-deftest pretty-view-gfm-test-inline-plain-text ()
+  (let ((kids (plist-get (pv-test-block "hello") :children)))
+    (should (equal (pv-test-type (car kids)) 'text))
+    (should (equal (plist-get (car kids) :value) "hello"))
+    (should (null (plist-get (pv-test-block "hello") :raw)))))
+
+(ert-deftest pretty-view-gfm-test-code-span ()
+  (let* ((kids (plist-get (pv-test-block "a `code` b") :children))
+         (span (nth 1 kids)))
+    (should (eq (pv-test-type span) 'code-span))
+    (should (equal (plist-get span :code) "code"))))
+
+(ert-deftest pretty-view-gfm-test-code-span-double-backtick ()
+  (let ((span (nth 0 (plist-get (pv-test-block "``a ` b``") :children))))
+    (should (eq (pv-test-type span) 'code-span))
+    (should (equal (plist-get span :code) "a ` b"))))
+
+(ert-deftest pretty-view-gfm-test-code-span-strips-one-space-each-side ()
+  (let ((span (nth 0 (plist-get (pv-test-block "`` ` ``") :children))))
+    (should (equal (plist-get span :code) "`"))))
+
+(ert-deftest pretty-view-gfm-test-unmatched-backtick-is-literal ()
+  (should (equal (pv-test-text (pv-test-block "a ` b")) "a ` b")))
+
+(ert-deftest pretty-view-gfm-test-backslash-escape ()
+  (should (equal (pv-test-text (pv-test-block "\\*not em\\*")) "*not em*")))
+
+(ert-deftest pretty-view-gfm-test-backslash-before-ordinary-char-is-literal ()
+  (should (equal (pv-test-text (pv-test-block "a\\b")) "a\\b")))
+
+(ert-deftest pretty-view-gfm-test-hard-break-two-spaces ()
+  (let ((kids (plist-get (pv-test-block "a  \nb") :children)))
+    (should (seq-find (lambda (n) (eq (pv-test-type n) 'line-break)) kids))))
+
+(ert-deftest pretty-view-gfm-test-hard-break-backslash ()
+  (let ((kids (plist-get (pv-test-block "a\\\nb") :children)))
+    (should (seq-find (lambda (n) (eq (pv-test-type n) 'line-break)) kids))))
+
+(ert-deftest pretty-view-gfm-test-soft-break ()
+  (let ((kids (plist-get (pv-test-block "a\nb") :children)))
+    (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids))))
+
+(ert-deftest pretty-view-gfm-test-inline-runs-inside-table-cells ()
+  (let* ((node (pv-test-block "| `x` |\n|---|\n| y |"))
+         (cell (car (plist-get (nth 0 (plist-get node :children)) :children))))
+    (should (eq (pv-test-type (car (plist-get cell :children))) 'code-span))))
+
+(ert-deftest pretty-view-gfm-test-code-block-is-not-inline-parsed ()
+  (let ((node (pv-test-block "```\n`x`\n```")))
+    (should (equal (plist-get node :code) "`x`\n"))
+    (should (null (plist-get node :children)))))
 
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here
