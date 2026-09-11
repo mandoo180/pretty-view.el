@@ -97,11 +97,14 @@ Maps a downcased label to a cons of href and title.  Bound by
        (gethash (downcase (string-trim label)) pretty-view-gfm--link-refs)))
 
 (defun pretty-view-gfm--dedent (line width)
-  "Return LINE with up to WIDTH leading spaces removed."
-  (let ((i 0))
-    (while (and (< i width)
+  "Return LINE with up to WIDTH columns of leading whitespace removed.
+A tab counts as four columns, so an indentation written with tabs is
+stripped the same as one written with spaces."
+  (let ((i 0) (used 0))
+    (while (and (< used width)
                 (< i (length line))
-                (eq (aref line i) ?\s))
+                (memq (aref line i) '(?\s ?\t)))
+      (setq used (+ used (if (eq (aref line i) ?\t) 4 1)))
       (setq i (1+ i)))
     (substring line i)))
 
@@ -183,7 +186,7 @@ nor a blank line followed by more of the same list."
           (push (pretty-view-gfm--dedent line 2) body)
           (setq rest (cdr rest)))
          ;; Lazy continuation of the item's paragraph.
-         ((and body (not pending-blank))
+         ((and body (not pending-blank) (not (pretty-view-gfm--block-start-p line)))
           (push line body)
           (setq rest (cdr rest)))
          (t (setq done t)))))
@@ -395,7 +398,8 @@ Stops before a blank line or a construct that interrupts a paragraph."
          ;; Setext heading: a paragraph followed by = or - underline.
          ((and (cdr lines)
                (string-match pretty-view-gfm--setext-re (nth 1 lines))
-               (not (pretty-view-gfm--blank-p line)))
+               (not (pretty-view-gfm--blank-p line))
+               (not (pretty-view-gfm--block-start-p line)))
           (push (pretty-view-gfm--heading
                  (if (string-prefix-p "=" (string-trim (nth 1 lines))) 1 2)
                  (string-trim line))

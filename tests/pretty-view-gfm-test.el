@@ -327,5 +327,23 @@
     (should (eq (pv-test-type (nth 0 blocks)) 'paragraph))
     (should (eq (pv-test-type (nth 1 blocks)) 'html-block))))
 
+(ert-deftest pretty-view-gfm-test-setext-does-not-promote-a-block-start ()
+  "A setext underline promotes a paragraph, not a line that starts a block."
+  (let ((blocks (pv-test-blocks "<div>\n---\n</div>")))
+    (should (= (length blocks) 1))
+    (should (eq (pv-test-type (car blocks)) 'html-block)))
+  (let ((blocks (pv-test-blocks "- a\n---")))
+    (should (eq (pv-test-type (nth 0 blocks)) 'list))
+    (should (eq (pv-test-type (nth 1 blocks)) 'thematic-break))))
+
+(ert-deftest pretty-view-gfm-test-setext-still-promotes-a-paragraph ()
+  (should (eq (pv-test-type (pv-test-block "Title\n---")) 'heading))
+  (should (= (plist-get (pv-test-block "Title\n===") :level) 1)))
+
+(ert-deftest pretty-view-gfm-test-footnote-tab-continuation ()
+  (let* ((node (pv-test-block "[^a]: first\n\tsecond"))
+         (para (car (plist-get node :children))))
+    (should (equal (plist-get para :raw) "first\nsecond"))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here
