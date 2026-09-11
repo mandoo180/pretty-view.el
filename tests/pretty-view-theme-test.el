@@ -150,7 +150,7 @@
     (dolist (class '("pv-code" "pv-table" "pv-task" "pv-footnote" "pv-fnref"
                      "pv-keyword" "pv-string" "pv-comment" "pv-function"
                      "pv-variable" "pv-type" "pv-constant" "pv-builtin"
-                     "pv-toc"))
+                     "pv-toc" "pv-error"))
       (should (string-match-p (regexp-quote class) css)))))
 
 (defun pv-test-relative-luminance (hex)
