@@ -57,6 +57,68 @@ Lowercases, drops punctuation, and joins words with hyphens."
   "Return TEXT without a trailing ATX closing sequence."
   (string-trim (replace-regexp-in-string "[ \t]+#+[ \t]*\\'" "" text)))
 
+(defconst pretty-view-gfm--fence-re
+  "\\`\\( \\{0,3\\}\\)\\(`\\{3,\\}\\|~\\{3,\\}\\)[ \t]*\\(.*?\\)[ \t]*\\'"
+  "Match an opening code fence.
+Group 1 is the indentation, group 2 the fence, group 3 the info string.")
+
+(defun pretty-view-gfm--dedent (line width)
+  "Return LINE with up to WIDTH leading spaces removed."
+  (let ((i 0))
+    (while (and (< i width)
+                (< i (length line))
+                (eq (aref line i) ?\s))
+      (setq i (1+ i)))
+    (substring line i)))
+
+(defun pretty-view-gfm--close-fence-p (line fence)
+  "Return non-nil when LINE closes a block opened by FENCE."
+  (let ((char (aref fence 0)))
+    (string-match-p
+     (format "\\` \\{0,3\\}%c\\{%d,\\}[ \t]*\\'"
+             char (length fence))
+     line)))
+
+(defun pretty-view-gfm--take-fenced (lines)
+  "Consume a fenced code block from LINES.
+Return a cons of the node and the remaining lines."
+  (string-match pretty-view-gfm--fence-re (car lines))
+  (let* ((indent (length (match-string 1 (car lines))))
+         (fence (match-string 2 (car lines)))
+         (info (match-string 3 (car lines)))
+         (lang (when (and info (not (string-empty-p info)))
+                 (car (split-string info "[ \t]+" t))))
+         (rest (cdr lines))
+         (body nil))
+    (while (and rest (not (pretty-view-gfm--close-fence-p (car rest) fence)))
+      (push (pretty-view-gfm--dedent (car rest) indent) body)
+      (setq rest (cdr rest)))
+    (cons (list :type 'code-block :lang lang
+                :code (if body
+                          (concat (string-join (nreverse body) "\n") "\n")
+                        ""))
+          ;; Drop the closing fence when there is one.
+          (if rest (cdr rest) nil))))
+
+(defun pretty-view-gfm--take-indented (lines)
+  "Consume an indented code block from LINES.
+Return a cons of the node and the remaining lines."
+  (let ((body nil) (rest lines) (pending nil))
+    (while (and rest
+                (or (string-prefix-p "    " (car rest))
+                    (pretty-view-gfm--blank-p (car rest))))
+      (if (pretty-view-gfm--blank-p (car rest))
+          ;; Blank lines belong to the block only when code follows.
+          (push "" pending)
+        (setq body (append pending body))
+        (setq pending nil)
+        (push (substring (car rest) 4) body))
+      (setq rest (cdr rest)))
+    (cons (list :type 'code-block :lang nil
+                :code (concat (string-join (nreverse body) "\n") "\n"))
+          ;; Trailing blank lines go back to the caller.
+          (nthcdr (- (length lines) (length rest) (length pending)) lines))))
+
 (defun pretty-view-gfm--paragraph-end (lines)
   "Return the number of leading LINES belonging to one paragraph.
 Stops before a blank line or a construct that interrupts a paragraph."
@@ -66,7 +128,8 @@ Stops before a blank line or a construct that interrupts a paragraph."
         (if (and (> n 0)
                  (or (pretty-view-gfm--blank-p line)
                      (string-match-p pretty-view-gfm--thematic-break-re line)
-                     (string-match-p pretty-view-gfm--atx-re line)))
+                     (string-match-p pretty-view-gfm--atx-re line)
+                     (string-match-p pretty-view-gfm--fence-re line)))
             (setq stop t)
           (if (pretty-view-gfm--blank-p line)
               (setq stop t)
@@ -87,6 +150,11 @@ Stops before a blank line or a construct that interrupts a paragraph."
          ;; Blank lines separate blocks and carry no content.
          ((pretty-view-gfm--blank-p line)
           (setq lines (cdr lines)))
+         ;; Fenced code block.
+         ((string-match-p pretty-view-gfm--fence-re line)
+          (let ((result (pretty-view-gfm--take-fenced lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
          ;; Thematic break.
          ((string-match-p pretty-view-gfm--thematic-break-re line)
           (push (list :type 'thematic-break) nodes)
@@ -108,6 +176,12 @@ Stops before a blank line or a construct that interrupts a paragraph."
                  (string-trim line))
                 nodes)
           (setq lines (nthcdr 2 lines)))
+         ;; Indented code block.  Only when not continuing a paragraph,
+         ;; which the paragraph clause has already consumed.
+         ((string-prefix-p "    " line)
+          (let ((result (pretty-view-gfm--take-indented lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
          ;; Paragraph.
          (t
           (let* ((n (pretty-view-gfm--paragraph-end lines))

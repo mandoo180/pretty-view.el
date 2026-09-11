@@ -85,5 +85,57 @@
 (ert-deftest pretty-view-gfm-test-empty-input ()
   (should (equal (plist-get (pretty-view-gfm-parse "") :children) nil)))
 
+(ert-deftest pretty-view-gfm-test-fenced-code ()
+  (let ((node (pv-test-block "```elisp\n(+ 1 2)\n```")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (equal (plist-get node :lang) "elisp"))
+    (should (equal (plist-get node :code) "(+ 1 2)\n"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-no-lang ()
+  (let ((node (pv-test-block "```\nplain\n```")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (null (plist-get node :lang)))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-tilde ()
+  (let ((node (pv-test-block "~~~python\nx = 1\n~~~")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (equal (plist-get node :lang) "python"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-info-string-first-word ()
+  (let ((node (pv-test-block "```js title=\"a.js\"\nx\n```")))
+    (should (equal (plist-get node :lang) "js"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-keeps-markdown-literal ()
+  "Markdown inside a fence is content, not syntax."
+  (let ((node (pv-test-block "```\n# not a heading\n```")))
+    (should (equal (plist-get node :code) "# not a heading\n"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-unterminated-runs-to-end ()
+  (let ((node (pv-test-block "```\na\nb")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (equal (plist-get node :code) "a\nb\n"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-longer-fence-closes ()
+  "A closing fence must be at least as long as the opening fence."
+  (let ((node (pv-test-block "````\n```\nstill code\n````")))
+    (should (equal (plist-get node :code) "```\nstill code\n"))))
+
+(ert-deftest pretty-view-gfm-test-fenced-code-strips-indent ()
+  "Content is dedented by the opening fence's indentation."
+  (let ((node (pv-test-block "  ```\n  a\n   b\n  ```")))
+    (should (equal (plist-get node :code) "a\n b\n"))))
+
+(ert-deftest pretty-view-gfm-test-indented-code ()
+  (let ((node (pv-test-block "    indented\n    lines")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (null (plist-get node :lang)))
+    (should (equal (plist-get node :code) "indented\nlines\n"))))
+
+(ert-deftest pretty-view-gfm-test-indented-code-not-after-paragraph ()
+  "An indented line continuing a paragraph is paragraph text."
+  (let ((blocks (pv-test-blocks "text\n    continued")))
+    (should (= (length blocks) 1))
+    (should (eq (pv-test-type (car blocks)) 'paragraph))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here
