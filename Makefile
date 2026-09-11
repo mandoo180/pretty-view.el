@@ -3,9 +3,9 @@ LOAD  := -L . -L tests
 SRC   := $(wildcard pretty-view*.el)
 TESTS := $(wildcard tests/*-test.el)
 
-.PHONY: test compile checkdoc clean all
+.PHONY: test compile compile-isolated checkdoc clean all
 
-all: compile test
+all: compile-isolated test
 
 test:
 	$(EMACS) -Q --batch $(LOAD) --eval '(setq load-prefer-newer t)' -l ert $(addprefix -l ,$(TESTS)) \
@@ -15,6 +15,14 @@ compile: clean
 	$(EMACS) -Q --batch $(LOAD) \
 	  --eval '(setq byte-compile-error-on-warn t)' \
 	  -f batch-byte-compile $(SRC)
+
+compile-isolated: clean
+	@for f in $(SRC); do \
+	  echo "--- $$f"; \
+	  $(EMACS) -Q --batch $(LOAD) \
+	    --eval '(setq byte-compile-error-on-warn t)' \
+	    -f batch-byte-compile $$f || exit 1; \
+	done
 
 checkdoc:
 	$(EMACS) -Q --batch $(LOAD) \

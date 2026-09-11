@@ -25,6 +25,7 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
 
 (defgroup pretty-view nil
   "Render Org, Markdown, and text buffers to styled HTML."
