@@ -184,29 +184,89 @@ Save this to your `init.el`, then render any document containing `$...$` or `$$.
 
 ### Wrapping code blocks in `<figure>` via `pretty-view-renderers`
 
-To add a caption showing the language above each code block:
+To add a caption showing the language above each code block, wrap the built-in renderer. Built-in renderers are named functions precisely so an override can delegate to them — `pretty-view-render-code-block`, `pretty-view-render-paragraph`, and so on are all callable:
 
 ```elisp
-(defun pretty-view-recipe-code-figure (node render)
-  "Render code blocks wrapped in <figure> with a language caption."
-  (let ((lang (or (plist-get node :info-string) ""))
-        (code (funcall render (plist-get node :children))))
+(defun my-pretty-view-code-figure (node render)
+  "Render a code block inside a <figure> captioned with its language."
+  (let ((lang (or (plist-get node :lang) "")))
     (if (string-empty-p lang)
-        (format "<pre><code>%s</code></pre>" code)
-      (format "<figure><figcaption>%s</figcaption><pre><code class=\"language-%s\">%s</code></pre></figure>"
-              lang lang code))))
+        (pretty-view-render-code-block node render)
+      (format "<figure class=\"pv-code-figure\"><figcaption>%s</figcaption>%s</figure>\n"
+              (pretty-view-escape-html lang)
+              (pretty-view-render-code-block node render)))))
 
 (setf (alist-get 'code-block pretty-view-renderers)
-      'pretty-view-recipe-code-figure)
+      #'my-pretty-view-code-figure)
 ```
 
-For a code block with `info-string` "python" and content `print('hello')`, this produces:
+For a code block with language "python" and content `print('hello')`, this produces:
 
 ```html
-<figure><figcaption>python</figcaption><pre><code class="language-python">print('hello')</code></pre></figure>
+<figure class="pv-code-figure"><figcaption>python</figcaption><pre class="pv-code"><code class="language-python"><span class="pv-builtin">print</span>(<span class="pv-string">&#39;hello&#39;</span>)
+</code></pre>
+</figure>
 ```
 
-After saving this to your `init.el` and rendering a Markdown document with fenced code blocks, each will be wrapped with a caption showing the language.
+The built-in renderer handles escaping, syntax highlighting via font-lock, and all language-specific formatting. When you wrap it, you get all that for free.
+
+## Customization Variables
+
+In addition to the extension points above, the following variables control the package's appearance and behaviour. Set any of them via `M-x customize-group pretty-view` or in your `init.el` with `setq`.
+
+### Appearance
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-theme` | `'github-light` | Theme symbol (`'github-light`, `'github-dark`, `'sepia`, `'nord`, `'cyberpunk`) or `'auto` to follow OS light/dark mode |
+| `pretty-view-default-light-theme` | `'github-light` | Light theme used when `pretty-view-theme` is `'auto` |
+| `pretty-view-html-lang` | `"en"` | Value of the `lang` attribute on the generated `html` element |
+
+### Output and Browser
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-output-directory` | nil | Directory where HTML is written; nil means system temporary directory (or Windows `TEMP` on WSL) |
+| `pretty-view-browser` | `'default` | How to open the rendered file: `'default` (uses `browse-url`), a program name string, or a function |
+
+### Table of Contents
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-toc` | nil | Whether to emit a table of contents: nil for none, `t` for all levels, or an integer maximum depth. Org documents defer to their own `#+OPTIONS: toc:` |
+| `pretty-view-own-toc-modes` | `'(org-mode)` | Major modes whose converters emit their own TOC; TOC generation is suppressed for these |
+
+### Images and Media
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-inline-images` | `t` | When non-nil, embed local images as data URIs for a self-contained file |
+| `pretty-view-inline-image-max-bytes` | 2000000 | Maximum image size (in bytes) to embed; larger files are linked as `file://` URLs |
+
+### Content Rendering
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-allow-raw-html` | `t` | When non-nil, pass raw HTML and `javascript:` URLs through unchanged. See Threat Model section |
+| `pretty-view-text-as-markdown` | nil | When non-nil, route plain-text files through the Markdown parser instead of the plain-text converter |
+| `pretty-view-live-interval` | 1.5 | Seconds between browser reloads in `pretty-view-live-mode`; nil disables auto-reload |
+
+### Code and Syntax Highlighting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-code-mode-alist` | (built-ins) | Map code block info strings to Emacs major modes for syntax highlighting (e.g., `'("python" . python-mode)`) |
+| `pretty-view-face-class-alist` | (built-ins) | Map Emacs font-lock faces to CSS class names for syntax highlighting (e.g., `'((font-lock-keyword-face . "pv-keyword"))`) |
+
+### Extension Points
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-renderers` | (built-ins) | Map Markdown AST node types to rendering functions; customize to override rendering |
+| `pretty-view-org-transcoders` | (built-ins) | Map Org element types to transcoding functions; customize to override Org export |
+| `pretty-view-source-functions` | (built-ins) | Map major modes to HTML body converters; add entries to support new formats |
+| `pretty-view-head-functions` | nil | Hook: functions contributing markup to `<head>` (e.g., script tags for KaTeX or Mermaid) |
+| `pretty-view-body-filter-functions` | nil | Hook: functions filtering the rendered body (e.g., to post-process HTML) |
 
 ## Platform Notes
 
