@@ -22,6 +22,7 @@
 
 (require 'ert)
 (require 'pretty-view-theme)
+(require 'pretty-view-themes)
 
 (defmacro pv-with-clean-themes (&rest body)
   "Run BODY with an empty theme registry."
@@ -116,6 +117,41 @@
 (ert-deftest pretty-view-theme-test-odd-length-palette-signals ()
   (pv-with-clean-themes
    (should-error (pretty-view-define-theme 'demo :bg "#111" :fg))))
+
+(ert-deftest pretty-view-themes-test-all-five-registered ()
+  (dolist (name '(github-light github-dark sepia nord cyberpunk))
+    (should (pretty-view-theme-palette name))))
+
+(ert-deftest pretty-view-themes-test-every-theme-fills-every-colour-slot ()
+  "A theme missing a colour would inherit a light default and break in dark."
+  (dolist (name '(github-light github-dark sepia nord cyberpunk))
+    (let ((palette (pretty-view-theme-palette name)))
+      (dolist (slot '(:bg :fg :muted :accent :border :code-bg :code-fg
+                      :quote-border :quote-fg :table-stripe
+                      :keyword :string :comment :function :variable
+                      :type :constant :builtin))
+        (should (plist-get palette slot))))))
+
+(ert-deftest pretty-view-themes-test-light-themes-declare-a-dark-variant ()
+  (should (eq (plist-get (pretty-view-theme-palette 'github-light)
+                         :dark-variant)
+              'github-dark))
+  (should (plist-get (pretty-view-theme-palette 'sepia) :dark-variant)))
+
+(ert-deftest pretty-view-themes-test-css-is-generated-for-each ()
+  (dolist (name '(github-light github-dark sepia nord cyberpunk))
+    (let ((css (pretty-view-theme-css name)))
+      (should (> (length css) 500))
+      (should (string-match-p "--pv-bg" css)))))
+
+(ert-deftest pretty-view-theme-test-base-stylesheet-styles-every-class ()
+  "Every class the renderers emit must be styled."
+  (let ((css pretty-view-theme--base-stylesheet))
+    (dolist (class '("pv-code" "pv-table" "pv-task" "pv-footnote" "pv-fnref"
+                     "pv-keyword" "pv-string" "pv-comment" "pv-function"
+                     "pv-variable" "pv-type" "pv-constant" "pv-builtin"
+                     "pv-toc"))
+      (should (string-match-p (regexp-quote class) css)))))
 
 (provide 'pretty-view-theme-test)
 ;;; pretty-view-theme-test.el ends here

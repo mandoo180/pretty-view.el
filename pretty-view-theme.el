@@ -58,9 +58,165 @@
 A theme that omits a slot inherits the value here.  The set of keys in
 this plist is the complete set of legal slots.")
 
-(defconst pretty-view-theme--base-stylesheet
-  "body { background: var(--pv-bg); color: var(--pv-fg); }\n"
-  "The static stylesheet, written against the CSS custom properties.")
+(defconst pretty-view-theme--base-stylesheet "
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  padding-block: 3rem;
+  padding-inline: max(1rem, calc((100% - var(--pv-measure)) / 2));
+  background: var(--pv-bg);
+  color: var(--pv-fg);
+  font-family: var(--pv-body-font);
+  font-size: 1rem;
+  line-height: var(--pv-line-height);
+  overflow-wrap: break-word;
+}
+.pv-doc > *:first-child { margin-top: 0; }
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 2.2em 0 0.7em;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+h1 { font-size: 2em; }
+h2 { font-size: 1.5em; }
+h3 { font-size: 1.22em; }
+h4 { font-size: 1.05em; }
+h5, h6 { font-size: 1em; color: var(--pv-muted); }
+h1, h2 { padding-bottom: 0.3em; border-bottom: 1px solid var(--pv-rule); }
+
+p { margin: 0 0 1.1em; }
+a { color: var(--pv-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+strong { font-weight: 650; }
+mark { background: var(--pv-mark-bg); color: inherit; }
+small { color: var(--pv-muted); }
+
+ul, ol { margin: 0 0 1.1em; padding-left: 1.6em; }
+li { margin: 0.25em 0; }
+li > ul, li > ol { margin-bottom: 0.2em; }
+li.pv-task { list-style: none; margin-left: -1.4em; }
+li.pv-task input { margin-right: 0.45em; vertical-align: middle; }
+
+blockquote {
+  margin: 0 0 1.1em;
+  padding: 0.1em 1em;
+  border-left: 0.25em solid var(--pv-quote-border);
+  color: var(--pv-quote-fg);
+}
+blockquote > *:last-child { margin-bottom: 0; }
+
+hr { height: 1px; margin: 2em 0; border: 0; background: var(--pv-rule); }
+
+img { max-width: 100%; height: auto; border-radius: var(--pv-radius); }
+
+code, kbd, samp {
+  font-family: var(--pv-mono-font);
+  font-size: 0.88em;
+}
+:not(pre) > code {
+  padding: 0.15em 0.36em;
+  background: var(--pv-code-bg);
+  border-radius: var(--pv-radius);
+}
+pre.pv-code {
+  margin: 0 0 1.2em;
+  padding: 0.9em 1em;
+  max-width: 100%;
+  overflow-x: auto;
+  background: var(--pv-code-bg);
+  color: var(--pv-code-fg);
+  border: 1px solid var(--pv-code-border);
+  border-radius: var(--pv-radius);
+  line-height: 1.5;
+}
+pre.pv-code code { padding: 0; background: none; }
+
+table.pv-table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0 0 1.3em;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+table.pv-table th, table.pv-table td {
+  padding: 0.45em 0.85em;
+  border: 1px solid var(--pv-border);
+}
+table.pv-table th { background: var(--pv-table-stripe); font-weight: 650; }
+table.pv-table tbody tr:nth-child(even) { background: var(--pv-table-stripe); }
+
+nav.pv-toc {
+  margin: 0 0 2.5em;
+  padding: 0.9em 1.1em;
+  background: var(--pv-code-bg);
+  border: 1px solid var(--pv-border);
+  border-radius: var(--pv-radius);
+  font-size: 0.94em;
+}
+nav.pv-toc ul { margin: 0; padding: 0; list-style: none; }
+nav.pv-toc li { margin: 0.15em 0; }
+nav.pv-toc .pv-toc-2 { padding-left: 1em; }
+nav.pv-toc .pv-toc-3 { padding-left: 2em; }
+nav.pv-toc .pv-toc-4, nav.pv-toc .pv-toc-5, nav.pv-toc .pv-toc-6 {
+  padding-left: 3em;
+  color: var(--pv-muted);
+}
+
+sup.pv-fnref { font-size: 0.75em; }
+sup.pv-fnref a { padding: 0 0.15em; }
+.pv-footnote {
+  margin: 0.4em 0;
+  padding-left: 0.2em;
+  font-size: 0.92em;
+  color: var(--pv-muted);
+}
+.pv-footnote > p { display: inline; margin: 0; }
+.pv-fnback { margin-left: 0.4em; }
+
+p.pv-text { white-space: pre-wrap; }
+
+.pv-error {
+  margin: 1em 0;
+  padding: 0.8em 1em;
+  border: 1px solid var(--pv-warning);
+  border-left-width: 0.25em;
+  border-radius: var(--pv-radius);
+  background: var(--pv-code-bg);
+}
+
+.pv-keyword      { color: var(--pv-keyword); }
+.pv-string       { color: var(--pv-string); }
+.pv-comment      { color: var(--pv-comment); font-style: italic; }
+.pv-doc          { color: var(--pv-doc); font-style: italic; }
+.pv-function     { color: var(--pv-function); }
+.pv-variable     { color: var(--pv-variable); }
+.pv-type         { color: var(--pv-type); }
+.pv-constant     { color: var(--pv-constant); }
+.pv-builtin      { color: var(--pv-builtin); }
+.pv-preprocessor { color: var(--pv-preprocessor); }
+.pv-operator     { color: var(--pv-operator); }
+.pv-escape       { color: var(--pv-escape); }
+.pv-warning      { color: var(--pv-warning); }
+
+@media (max-width: 34rem) {
+  body { padding-block: 1.6rem; font-size: 0.97rem; }
+  h1 { font-size: 1.7em; }
+  h2 { font-size: 1.35em; }
+}
+
+@media print {
+  body { padding: 0; color: #000; background: #fff; }
+  nav.pv-toc { display: none; }
+  pre.pv-code { white-space: pre-wrap; overflow-x: visible; }
+  a { color: inherit; text-decoration: underline; }
+}
+"
+  "The static stylesheet, written against the CSS custom properties.
+Themes supply colours and metrics; layout is decided once, here.")
 
 (defun pretty-view-theme--slots ()
   "Return the list of legal palette slot keywords."
