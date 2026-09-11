@@ -397,5 +397,77 @@
     (should (equal (plist-get node :code) "`x`\n"))
     (should (null (plist-get node :children)))))
 
+(defun pv-test-inline (markdown &optional n)
+  "Return inline node N (default 0) of the first block of MARKDOWN."
+  (nth (or n 0) (plist-get (pv-test-block markdown) :children)))
+
+(ert-deftest pretty-view-gfm-test-inline-link ()
+  (let ((node (pv-test-inline "[text](https://example.com)")))
+    (should (eq (pv-test-type node) 'link))
+    (should (equal (plist-get node :href) "https://example.com"))
+    (should (equal (pv-test-text node) "text"))))
+
+(ert-deftest pretty-view-gfm-test-inline-link-with-title ()
+  (let ((node (pv-test-inline "[t](https://e.com \"Title\")")))
+    (should (equal (plist-get node :title) "Title"))))
+
+(ert-deftest pretty-view-gfm-test-inline-link-angle-destination ()
+  (let ((node (pv-test-inline "[t](<https://e.com/a b>)")))
+    (should (equal (plist-get node :href) "https://e.com/a b"))))
+
+(ert-deftest pretty-view-gfm-test-image ()
+  (let ((node (pv-test-inline "![alt](img.png)")))
+    (should (eq (pv-test-type node) 'image))
+    (should (equal (plist-get node :src) "img.png"))
+    (should (equal (plist-get node :alt) "alt"))))
+
+(ert-deftest pretty-view-gfm-test-reference-link ()
+  (let* ((doc (pretty-view-gfm-parse "[t][ref]\n\n[ref]: https://e.com \"T\""))
+         (node (car (plist-get (car (plist-get doc :children)) :children))))
+    (should (eq (pv-test-type node) 'link))
+    (should (equal (plist-get node :href) "https://e.com"))
+    (should (equal (plist-get node :title) "T"))))
+
+(ert-deftest pretty-view-gfm-test-collapsed-reference-link ()
+  (let* ((doc (pretty-view-gfm-parse "[ref][]\n\n[ref]: https://e.com"))
+         (node (car (plist-get (car (plist-get doc :children)) :children))))
+    (should (equal (plist-get node :href) "https://e.com"))))
+
+(ert-deftest pretty-view-gfm-test-shortcut-reference-link ()
+  (let* ((doc (pretty-view-gfm-parse "[ref]\n\n[ref]: https://e.com"))
+         (node (car (plist-get (car (plist-get doc :children)) :children))))
+    (should (equal (plist-get node :href) "https://e.com"))))
+
+(ert-deftest pretty-view-gfm-test-undefined-reference-stays-literal ()
+  (should (equal (pv-test-text (pv-test-block "[nope]")) "[nope]")))
+
+(ert-deftest pretty-view-gfm-test-angle-autolink ()
+  (let ((node (pv-test-inline "<https://example.com>")))
+    (should (eq (pv-test-type node) 'autolink))
+    (should (equal (plist-get node :href) "https://example.com"))))
+
+(ert-deftest pretty-view-gfm-test-bare-url-autolink ()
+  (let ((node (pv-test-inline "see https://example.com now" 1)))
+    (should (eq (pv-test-type node) 'autolink))
+    (should (equal (plist-get node :href) "https://example.com"))))
+
+(ert-deftest pretty-view-gfm-test-bare-url-drops-trailing-punctuation ()
+  (let ((node (pv-test-inline "see https://example.com." 1)))
+    (should (equal (plist-get node :href) "https://example.com"))))
+
+(ert-deftest pretty-view-gfm-test-footnote-reference ()
+  (let ((node (pv-test-inline "text[^a]" 1)))
+    (should (eq (pv-test-type node) 'footnote-reference))
+    (should (equal (plist-get node :label) "a"))))
+
+(ert-deftest pretty-view-gfm-test-inline-html ()
+  (let ((node (pv-test-inline "<span>x</span>")))
+    (should (eq (pv-test-type node) 'html-inline))
+    (should (equal (plist-get node :html) "<span>"))))
+
+(ert-deftest pretty-view-gfm-test-link-text-is-inline-parsed ()
+  (let ((node (pv-test-inline "[a `b` c](x)")))
+    (should (eq (pv-test-type (nth 1 (plist-get node :children))) 'code-span))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here

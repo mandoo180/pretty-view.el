@@ -75,7 +75,8 @@ an ordered item, group 4 the first line of content.")
 (defconst pretty-view-gfm--task-re "\\`\\[\\([ xX]\\)\\][ \t]+\\(.*\\)\\'"
   "Match a GFM task list marker at the start of item content.")
 
-(defconst pretty-view-gfm--html-block-re "\\` \\{0,3\\}<\\(?:[a-zA-Z/!?]\\)"
+(defconst pretty-view-gfm--html-block-re
+  "\\` \\{0,3\\}\\(?:<\\(?:script\\|pre\\|style\\)\\(?:[ \t>]\\|$\\)\\|<!--\\|<\\?\\|<!\\(?:[A-Z]\\|>\\)\\|<!\\[CDATA\\[\\|</?[a-zA-Z][a-zA-Z0-9-]*\\(?:[ \t].*\\)?[ \t]*>[ \t]*$\\)"
   "Match a line that opens an HTML block.")
 
 (defconst pretty-view-gfm--link-def-re
@@ -482,6 +483,88 @@ Return a cons of the node and the position after it, or nil."
             (setq code (substring code 1 -1)))
           (cons (list :type 'code-span :code code) (+ close width)))))))
 
+(defconst pretty-view-gfm--autolink-re
+  "\\`<\\([a-zA-Z][a-zA-Z0-9+.-]\\{1,31\\}:[^<> \t]*\\)>"
+  "Match an angle-bracket autolink.")
+
+(defconst pretty-view-gfm--bare-url-re
+  "\\`\\(https?://[^ \t\n<>\"]+\\)"
+  "Match a bare URL for GFM autolinking.")
+
+(defconst pretty-view-gfm--html-inline-re
+  "\\`\\(</?[a-zA-Z][a-zA-Z0-9-]*\\(?:[ \t][^<>]*\\)?/?>\\|<!--.*?-->\\)"
+  "Match an inline HTML tag or comment.")
+
+(defun pretty-view-gfm--matching-bracket (string start)
+  "Return the index of the `]' closing the `[' at START in STRING, or nil."
+  (let ((depth 0) (i start) (n (length string)) (found nil))
+    (while (and (< i n) (not found))
+      (let ((c (aref string i)))
+        (cond
+         ((eq c ?\\) (setq i (1+ i)))
+         ((eq c ?\[) (setq depth (1+ depth)))
+         ((eq c ?\]) (setq depth (1- depth))
+          (when (zerop depth) (setq found i)))))
+      (setq i (1+ i)))
+    found))
+
+(defun pretty-view-gfm--read-destination (string start)
+  "Read a link destination and title from STRING at START.
+START must point at the opening parenthesis.  Return a list of href,
+title, and the position after the closing parenthesis, or nil."
+  (when (and (< start (length string)) (eq (aref string start) ?\())
+    (let ((sub (substring string start)))
+      (when (string-match
+             "\\`(\\([ \t]*\\)\\(?:<\\([^>]*\\)>\\|\\([^ \t)]*\\)\\)\\(?:[ \t]+[\"']\\(.*?\\)[\"']\\)?[ \t]*)"
+             sub)
+        (list (or (match-string 2 sub) (match-string 3 sub) "")
+              (match-string 4 sub)
+              (+ start (match-end 0)))))))
+
+(defun pretty-view-gfm--read-label (string start)
+  "Read a reference label from STRING at START.
+START must point at `['.  Return a cons of the label text and the
+position after `]', or nil."
+  (when (and (< start (length string)) (eq (aref string start) ?\[))
+    (when-let* ((close (pretty-view-gfm--matching-bracket string start)))
+      (cons (substring string (1+ start) close) (1+ close)))))
+
+(defun pretty-view-gfm--link-at (string pos image)
+  "Try to read a link, or an image when IMAGE is non-nil, at POS in STRING.
+Return a cons of the node and the position after it, or nil."
+  (let* ((open (if image (1+ pos) pos))
+         (close (pretty-view-gfm--matching-bracket string open)))
+    (when close
+      (let* ((text (substring string (1+ open) close))
+             (after (1+ close))
+             (inline (pretty-view-gfm--read-destination string after))
+             (href nil) (title nil) (end nil))
+        (cond
+         (inline
+          (setq href (nth 0 inline) title (nth 1 inline) end (nth 2 inline)))
+         ;; Full or collapsed reference: [text][label] or [text][].
+         ((when-let* ((lab (pretty-view-gfm--read-label string after)))
+            (let* ((label (if (string-empty-p (car lab)) text (car lab)))
+                   (def (pretty-view-gfm-link-ref label)))
+              (when def
+                (setq href (car def) title (cdr def) end (cdr lab))
+                t))))
+         ;; Shortcut reference: [label].
+         ((when-let* ((def (pretty-view-gfm-link-ref text)))
+            (setq href (car def) title (cdr def) end after)
+            t)))
+        (when href
+          (cons (if image
+                    (list :type 'image :src href :title title
+                          :alt (pretty-view-gfm--plain-text text))
+                  (list :type 'link :href href :title title
+                        :children (pretty-view-gfm--parse-inlines text)))
+                end))))))
+
+(defun pretty-view-gfm--plain-text (string)
+  "Return STRING with inline markup removed, for use as image alt text."
+  (replace-regexp-in-string "[][*_`~]" "" string))
+
 (defun pretty-view-gfm--parse-inlines (string)
   "Parse STRING into a list of inline nodes."
   (let ((nodes nil) (buf "") (i 0) (n (length string)))
@@ -515,6 +598,61 @@ Return a cons of the node and the position after it, or nil."
                          (setq i (cdr result)))
                 (setq buf (concat buf "`"))
                 (setq i (1+ i)))))
+           ;; Image.
+           ((and (eq c ?!) (< (1+ i) n) (eq (aref string (1+ i)) ?\[)
+                 (pretty-view-gfm--link-at string i t))
+            (let ((result (pretty-view-gfm--link-at string i t)))
+              (flush)
+              (push (car result) nodes)
+              (setq i (cdr result))))
+           ;; Footnote reference.
+           ((and (eq c ?\[) (< (1+ i) n) (eq (aref string (1+ i)) ?^)
+                 (string-match "\\`\\[\\^\\([^]]+\\)\\]" (substring string i)))
+            (let ((sub (substring string i)))
+              (string-match "\\`\\[\\^\\([^]]+\\)\\]" sub)
+              (flush)
+              (push (list :type 'footnote-reference
+                          :label (match-string 1 sub))
+                    nodes)
+              (setq i (+ i (match-end 0)))))
+           ;; Link, inline or reference.
+           ((and (eq c ?\[) (pretty-view-gfm--link-at string i nil))
+            (let ((result (pretty-view-gfm--link-at string i nil)))
+              (flush)
+              (push (car result) nodes)
+              (setq i (cdr result))))
+           ;; Angle autolink, then inline HTML.
+           ((eq c ?<)
+            (let ((sub (substring string i)))
+              (cond
+               ((string-match pretty-view-gfm--autolink-re sub)
+                (flush)
+                (push (list :type 'autolink :href (match-string 1 sub)
+                            :children (list (list :type 'text
+                                                  :value (match-string 1 sub))))
+                      nodes)
+                (setq i (+ i (match-end 0))))
+               ((string-match pretty-view-gfm--html-inline-re sub)
+                (flush)
+                (push (list :type 'html-inline :html (match-string 1 sub))
+                      nodes)
+                (setq i (+ i (match-end 0))))
+               (t (setq buf (concat buf "<"))
+                  (setq i (1+ i))))))
+           ;; Bare URL autolink.
+           ((and (memq c '(?h))
+                 (string-match pretty-view-gfm--bare-url-re
+                               (substring string i)))
+            (let* ((sub (substring string i))
+                   (url (progn (string-match pretty-view-gfm--bare-url-re sub)
+                               (match-string 1 sub)))
+                   ;; Trailing punctuation is sentence punctuation, not URL.
+                   (url (replace-regexp-in-string "[.,:;!?)]+\\'" "" url)))
+              (flush)
+              (push (list :type 'autolink :href url
+                          :children (list (list :type 'text :value url)))
+                    nodes)
+              (setq i (+ i (length url)))))
            ;; Hard break: two or more trailing spaces before a newline.
            ((and (eq c ?\s)
                  (string-match "\\` \\{2,\\}\n" (substring string i)))
