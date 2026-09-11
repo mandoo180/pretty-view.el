@@ -8,7 +8,7 @@ TESTS := $(wildcard tests/*-test.el)
 all: compile test
 
 test:
-	$(EMACS) -Q --batch $(LOAD) -l ert $(addprefix -l ,$(TESTS)) \
+	$(EMACS) -Q --batch $(LOAD) --eval '(setq load-prefer-newer t)' -l ert $(addprefix -l ,$(TESTS)) \
 	  -f ert-run-tests-batch-and-exit
 
 compile: clean
