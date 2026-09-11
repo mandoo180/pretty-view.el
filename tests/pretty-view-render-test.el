@@ -305,5 +305,23 @@
         (should (string-match-p "<h1[^>]*>A</h1>" html))
         (should (string-match-p "<h1[^>]*>B</h1>" html))))))
 
+(ert-deftest pretty-view-render-test-tight-list-item-with-sublist-has-no-paragraph ()
+  "Every item of a tight list is unwrapped, including one holding a sublist."
+  (let ((html (pv-render "- first\n- second\n  - nested\n- third")))
+    (should-not (string-match-p "<p>second</p>" html))
+    (should (string-match-p "<li>second" html))
+    (should (string-match-p "<ul>" html))))
+
+(ert-deftest pretty-view-render-test-loose-list-keeps-paragraphs ()
+  "A loose list still wraps its item content in paragraphs."
+  (let ((html (pv-render "- a\n\n- b")))
+    (should (string-match-p "<p>a</p>" html))
+    (should (string-match-p "<p>b</p>" html))))
+
+(ert-deftest pretty-view-render-test-nested-tight-list-inside-loose-list ()
+  "Tightness is per-list: a tight sublist inside a loose list is unwrapped."
+  (let ((html (pv-render "- a\n\n- b\n  - x\n  - y")))
+    (should (string-match-p "<li>x</li>" html))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here

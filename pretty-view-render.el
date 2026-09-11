@@ -208,10 +208,17 @@ security boundary."
                              (pretty-view-escape-attribute lang)) "")
             (pretty-view-render-fontified-code (plist-get node :code) lang))))
 
+(defvar pretty-view-render--tight-list nil
+  "Non-nil while rendering the items of a tight list.
+Bound by `pretty-view-render-list'; read by the item renderers so a
+tight item's paragraph is unwrapped even when the item also holds a
+nested list.")
+
 (defun pretty-view-render-list (node render)
   "Render list NODE using RENDER for its items."
   (let ((ordered (plist-get node :ordered))
-        (start (plist-get node :start)))
+        (start (plist-get node :start))
+        (pretty-view-render--tight-list (plist-get node :tight)))
     (format "<%s%s>\n%s</%s>\n"
             (if ordered "ol" "ul")
             (if (and ordered start (/= start 1))
@@ -221,11 +228,20 @@ security boundary."
 
 (defun pretty-view-render--item-body (node render)
   "Render the children of list item NODE using RENDER.
-A single paragraph is unwrapped so tight lists read as one line."
+A leading paragraph is unwrapped when the item is in a tight list, even
+if the item also holds a nested list. In loose lists, all paragraphs are
+kept wrapped."
   (let ((kids (plist-get node :children)))
-    (if (and (= (length kids) 1)
-             (eq (plist-get (car kids) :type) 'paragraph))
-        (funcall render (plist-get (car kids) :children))
+    (if pretty-view-render--tight-list
+        ;; In a tight list, unwrap the leading paragraph if present
+        (if (and (> (length kids) 0)
+                 (eq (plist-get (car kids) :type) 'paragraph))
+            (concat (funcall render (plist-get (car kids) :children))
+                    (if (> (length kids) 1)
+                        (concat "\n" (funcall render (cdr kids)))
+                      ""))
+          (concat "\n" (funcall render kids)))
+      ;; In a loose list, always render children as-is (paragraphs stay wrapped)
       (concat "\n" (funcall render kids)))))
 
 (defun pretty-view-render-list-item (node render)
