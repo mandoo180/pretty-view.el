@@ -73,13 +73,23 @@
       (should (string-match-p "B &amp; C" html)))))
 
 (ert-deftest pretty-view-html-test-toc-respects-depth ()
+  "Headings deeper than the limit are omitted; the rest still make a TOC."
   (let ((html (pretty-view-html--toc
-               "<h1 id=\"a\">A</h1>\n<h3 id=\"c\">C</h3>\n" 2)))
+               "<h1 id=\"a\">A</h1>\n<h2 id=\"b\">B</h2>\n<h3 id=\"c\">C</h3>\n" 2)))
     (should (string-match-p "#a" html))
+    (should (string-match-p "#b" html))
     (should-not (string-match-p "#c" html))))
 
 (ert-deftest pretty-view-html-test-toc-needs-two-headings ()
   (should (null (pretty-view-html--toc "<h1 id=\"a\">A</h1>\n" 6))))
+
+(ert-deftest pretty-view-html-test-toc-needs-two-headings-after-depth-filter ()
+  "Depth filtering happens first: one surviving heading means no TOC."
+  (should (null (pretty-view-html--toc
+                 "<h1 id=\"a\">A</h1>\n<h3 id=\"c\">C</h3>\n" 2)))
+  ;; ...and the same body with a deeper limit does produce one.
+  (should (pretty-view-html--toc
+           "<h1 id=\"a\">A</h1>\n<h3 id=\"c\">C</h3>\n" 6)))
 
 (ert-deftest pretty-view-html-test-toc-skips-headings-without-id ()
   (should (null (pretty-view-html--toc "<h1>A</h1>\n<h2>B</h2>\n" 6))))

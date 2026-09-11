@@ -110,9 +110,8 @@ Group 1 is the level, group 2 the id, group 3 the inner HTML.")
   "Return a table of contents for BODY up to MAX-DEPTH, or nil.
 Returns nil when BODY holds fewer than two headings with ids, because a
 one-entry contents list is noise."
-  (let* ((all-headings (pretty-view-html--headings body 6))
-         (headings (pretty-view-html--headings body max-depth)))
-    (when (> (length all-headings) 1)
+  (let ((headings (pretty-view-html--headings body max-depth)))
+    (when (> (length headings) 1)
       (format "<nav class=\"pv-toc\"><ul>\n%s</ul></nav>\n"
               (mapconcat
                (lambda (h)
