@@ -23,6 +23,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'seq)
 
 (defgroup pretty-view nil
@@ -82,11 +83,26 @@ A face with no entry produces no span, so its text is unstyled."
   "Return the major mode for the info string LANG, or nil."
   (when (and lang (not (string-empty-p lang)))
     (let ((lang (downcase lang)))
-      (or (cdr (assoc lang pretty-view-code-mode-alist))
-          (let ((ts (intern (concat lang "-ts-mode"))))
-            (and (fboundp ts) ts))
-          (let ((plain (intern (concat lang "-mode"))))
-            (and (fboundp plain) plain))))))
+      (or
+       ;; Check alist first; validate -ts-mode entries for grammar availability
+       (let ((mode (cdr (assoc lang pretty-view-code-mode-alist))))
+         (and mode
+              ;; If it's a -ts-mode, verify grammar is available
+              (if (string-suffix-p "-ts-mode" (symbol-name mode))
+                  (and (fboundp 'treesit-language-available-p)
+                       (treesit-language-available-p
+                        (intern (string-remove-suffix "-ts-mode" (symbol-name mode))))
+                       mode)
+                mode)))
+       ;; Try LANG-ts-mode with grammar check
+       (let ((ts (intern (concat lang "-ts-mode"))))
+         (and (fboundp ts)
+              (fboundp 'treesit-language-available-p)
+              (treesit-language-available-p (intern lang))
+              ts))
+       ;; Fall back to LANG-mode
+       (let ((plain (intern (concat lang "-mode"))))
+         (and (fboundp plain) plain))))))
 
 (defun pretty-view-render--face-class (face)
   "Return the CSS class for FACE, or nil.
@@ -124,13 +140,15 @@ when fontification fails."
     (if (not mode)
         (pretty-view-escape-html code)
       (condition-case nil
-          (with-temp-buffer
-            (insert code)
-            (with-timeout (2 (pretty-view-escape-html code))
-              (delay-mode-hooks (funcall mode))
-              (font-lock-mode 1)
-              (font-lock-ensure)
-              (pretty-view-render--fontify-buffer-html)))
+          (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
+                    ((symbol-function 'yes-or-no-p) (lambda (&rest _) nil)))
+            (with-temp-buffer
+              (insert code)
+              (with-timeout (2 (pretty-view-escape-html code))
+                (delay-mode-hooks (funcall mode))
+                (font-lock-mode 1)
+                (font-lock-ensure)
+                (pretty-view-render--fontify-buffer-html))))
         (error (pretty-view-escape-html code))))))
 
 (defun pretty-view-escape-html (string)

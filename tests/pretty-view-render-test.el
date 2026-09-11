@@ -79,5 +79,28 @@
   (let ((html (pretty-view-render-fontified-code "a\nb\n" nil)))
     (should (equal html "a\nb\n"))))
 
+(ert-deftest pretty-view-render-test-ts-mode-requires-a-grammar ()
+  "A -ts-mode is only chosen when its grammar is actually installed."
+  (let ((pretty-view-code-mode-alist nil))
+    (cl-letf (((symbol-function 'treesit-language-available-p)
+               (lambda (&rest _) nil)))
+      ;; python-mode is built in, so this must fall back to it, not to
+      ;; python-ts-mode.
+      (should (eq (pretty-view-render--code-mode "python") 'python-mode)))
+    (cl-letf (((symbol-function 'treesit-language-available-p)
+               (lambda (&rest _) t)))
+      (should (eq (pretty-view-render--code-mode "python") 'python-ts-mode)))))
+
+(ert-deftest pretty-view-render-test-fontifying-never-prompts ()
+  "Rendering a code block must not ask the user anything."
+  (let ((asked nil))
+    (cl-letf (((symbol-function 'y-or-n-p)
+               (lambda (&rest _) (setq asked t) nil))
+              ((symbol-function 'yes-or-no-p)
+               (lambda (&rest _) (setq asked t) nil)))
+      (dolist (lang '("python" "rust" "yaml" "ts" "rs" "js" "c" "json"))
+        (pretty-view-render-fontified-code "x = 1" lang))
+      (should-not asked))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here
