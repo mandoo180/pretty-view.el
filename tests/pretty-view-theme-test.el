@@ -186,7 +186,8 @@
       (dolist (slot '(:fg :muted :accent))
         (should (>= (pv-test-contrast (plist-get p slot) bg) 4.5)))
       (dolist (slot '(:keyword :string :comment :function
-                      :variable :type :constant :builtin))
+                      :variable :type :constant :builtin
+                      :doc :preprocessor :operator :escape :warning))
         (should (>= (pv-test-contrast (plist-get p slot) code-bg) 4.5))))))
 
 (provide 'pretty-view-theme-test)

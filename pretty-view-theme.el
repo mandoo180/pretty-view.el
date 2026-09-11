@@ -139,12 +139,16 @@ table.pv-table {
   max-width: 100%;
   overflow-x: auto;
   margin: 0 0 1.3em;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-top: 1px solid var(--pv-border);
+  border-left: 1px solid var(--pv-border);
   font-variant-numeric: tabular-nums;
 }
 table.pv-table th, table.pv-table td {
   padding: 0.45em 0.85em;
-  border: 1px solid var(--pv-border);
+  border-right: 1px solid var(--pv-border);
+  border-bottom: 1px solid var(--pv-border);
 }
 table.pv-table th { background: var(--pv-table-stripe); font-weight: 650; }
 table.pv-table tbody tr:nth-child(even) { background: var(--pv-table-stripe); }

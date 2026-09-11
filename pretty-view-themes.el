@@ -69,18 +69,20 @@
   :doc "#4b6b2f" :function "#7a4b9a" :variable "#433422"
   :type "#96591a" :constant "#2f5d7c" :builtin "#2f5d7c"
   :preprocessor "#7a4b9a" :operator "#5c4a2e"
-  :escape "#2f5d7c" :warning "#9a6b1a"
+  :escape "#2f5d7c" :warning "#7a4b1a"
   :body-font pretty-view-themes--serif-font
   :measure "40rem" :line-height "1.75"
   :dark-variant 'nord)
 
-;; Nord theme uses modified colors for contrast:
+;; Nord theme uses modified colors for contrast and distinctness:
 ;; - :keyword, :muted, :comment differ from upstream nord3/nord4 to meet WCAG AA
 ;;   on code backgrounds. Upstream intends nord3 (#616e88) against nord0 (darkest),
 ;;   not nord1 (#3b4252 code-bg). Legibility trumps palette fidelity.
+;; - :accent changed from #88c0d0 (duplicate with :function) to #d4c970 (warm gold)
+;;   so links are visually distinct from syntax tokens and from :escape/:warning.
 (pretty-view-define-theme 'nord
   :bg "#2e3440" :fg "#d8dee9" :muted "#909cb5"
-  :accent "#88c0d0" :accent-muted "#3b4252"
+  :accent "#d4c970" :accent-muted "#3b4252"
   :border "#434c5e" :rule "#434c5e"
   :code-bg "#3b4252" :code-fg "#e5e9f0" :code-border "#4c566a"
   :quote-border "#4c566a" :quote-fg "#a9b3c6"
@@ -88,13 +90,13 @@
   :keyword "#8fb3d6" :string "#a3be8c" :comment "#a3aec4"
   :doc "#a3be8c" :function "#88c0d0" :variable "#d8dee9"
   :type "#8fbcbb" :constant "#c9a3d9" :builtin "#8fb3d6"
-  :preprocessor "#b48ead" :operator "#81a1c1"
+  :preprocessor "#dab5e0" :operator "#9abde0"
   :escape "#ebcb8b" :warning "#ebcb8b"
   :dark-variant 'nord)
 
 (pretty-view-define-theme 'cyberpunk
   :bg "#0b0b12" :fg "#e8e6f0" :muted "#8b86a8"
-  :accent "#ff2e88" :accent-muted "#2a0f1e"
+  :accent "#5ce0b0" :accent-muted "#2a0f1e"
   :border "#2b2740" :rule "#2b2740"
   :code-bg "#14121f" :code-fg "#e8e6f0" :code-border "#332e4d"
   :quote-border "#ff2e88" :quote-fg "#b7b1cf"
