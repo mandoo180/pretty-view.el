@@ -140,5 +140,19 @@
       (org-mode)
       (should (equal (pretty-view-org-title) raw)))))
 
+(ert-deftest pretty-view-org-test-title-keeps-sentinel-characters ()
+  "No character may be used as an internal sentinel."
+  (dolist (raw '("circle ◯ here" "diamond ◆ here" "both ◯ and ◆"))
+    (with-temp-buffer
+      (insert (format "#+TITLE: %s\n* H\n" raw))
+      (org-mode)
+      (should (equal (pretty-view-org-title) raw)))))
+
+(ert-deftest pretty-view-org-test-title-keeps-braced-subscripts ()
+  (with-temp-buffer
+    (insert "#+TITLE: a_{bc} and d^{ef}\n* H\n")
+    (org-mode)
+    (should (equal (pretty-view-org-title) "a_{bc} and d^{ef}"))))
+
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here

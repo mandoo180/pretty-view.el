@@ -66,41 +66,47 @@ merged over the inherited `html' backend at export time."
 
 (defun pretty-view-org--plain-text (data)
   "Return the plain text content of DATA, an Org secondary string or object.
-Post-blank spaces are preserved."
+Post-blank spaces and subscript/superscript syntax are preserved."
   (cond
    ((stringp data) data)
    ((and (consp data) (symbolp (car data)))
-    (let ((contents (nthcdr 2 data)))
+    (let ((obj-type (car data))
+          (contents (nthcdr 2 data)))
       (let ((text (if contents
                       (mapconcat #'pretty-view-org--plain-text contents "")
                     (or (org-element-property :raw-value data) ""))))
-        (concat text (make-string (or (org-element-property :post-blank data) 0) 32)))))
+        ;; Reconstruct subscript/superscript syntax from the parse tree
+        (let ((text (cond
+                     ((eq obj-type 'subscript)
+                      (concat "_" (if (org-element-property :use-brackets-p data)
+                                      (concat "{" text "}")
+                                    text)))
+                     ((eq obj-type 'superscript)
+                      (concat "^" (if (org-element-property :use-brackets-p data)
+                                      (concat "{" text "}")
+                                    text)))
+                     (t text))))
+          ;; Append post-blank spaces
+          (concat text (make-string (or (org-element-property :post-blank data) 0) 32))))))
    ((listp data) (mapconcat #'pretty-view-org--plain-text data ""))
    (t "")))
 
 (defun pretty-view-org-title ()
   "Return the `#+TITLE:' of the current Org buffer, or nil.
-Underscores and carets are literal text, not subscript/superscript syntax."
+Subscripts, superscripts, and other markup are reconstructed as Org syntax."
   (let ((keywords (org-collect-keywords (list "title"))))
     (when keywords
       (let ((raw-title (cadr (assoc "TITLE" keywords))))
         (when raw-title
-          ;; Temporarily replace _ and ^ with placeholders to prevent
-          ;; them from being interpreted as subscript/superscript
-          (let* ((undersc-plh "◯")
-                 (caret-plh "◆")
-                 (escaped (replace-regexp-in-string "_" undersc-plh
-                            (replace-regexp-in-string "\\^" caret-plh raw-title))))
-            (let ((title-list (org-element-parse-secondary-string
-                               escaped
-                               (org-element-restriction 'paragraph))))
-              (let ((text (pretty-view-org--plain-text title-list)))
-                ;; Restore original characters
-                (let ((text (substring-no-properties text)))
-                  (let ((restored (replace-regexp-in-string caret-plh "^"
-                                    (replace-regexp-in-string undersc-plh "_" text))))
-                    (unless (string-empty-p (string-trim restored))
-                      (substring-no-properties (string-trim restored)))))))))))))
+          ;; Parse the secondary string as-is; subscripts/superscripts will
+          ;; be reconstructed from the parse tree by pretty-view-org--plain-text
+          (let ((title-list (org-element-parse-secondary-string
+                             raw-title
+                             (org-element-restriction 'paragraph))))
+            ;; Extract plain text (preserving post-blank spaces and subscript syntax)
+            (let ((text (pretty-view-org--plain-text title-list)))
+              (unless (string-empty-p (string-trim text))
+                (substring-no-properties (string-trim text))))))))))
 
 (defun pretty-view-org-body ()
   "Return the current Org buffer exported to an HTML body."
