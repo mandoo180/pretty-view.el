@@ -79,7 +79,8 @@ string or nil.  This is where to add a KaTeX or Mermaid script tag."
 (defcustom pretty-view-body-filter-functions nil
   "Functions filtering the rendered body.
 Each is called with the body string in the source buffer and returns
-the replacement, applied in order."
+the replacement, applied in order. A return value of nil leaves the body
+unchanged."
   :type 'hook
   :group 'pretty-view)
 
@@ -135,14 +136,16 @@ one-entry contents list is noise."
   (let ((mime (cdr (assoc (downcase (or (file-name-extension file) ""))
                           pretty-view-html--image-mime-alist))))
     (when (and mime
-               (file-readable-p file)
+               (file-regular-p file)
                (<= (file-attribute-size (file-attributes file))
                    pretty-view-inline-image-max-bytes))
-      (with-temp-buffer
-        (set-buffer-multibyte nil)
-        (insert-file-contents-literally file)
-        (format "data:%s;base64,%s"
-                mime (base64-encode-string (buffer-string) t))))))
+      (condition-case nil
+          (with-temp-buffer
+            (set-buffer-multibyte nil)
+            (insert-file-contents-literally file)
+            (format "data:%s;base64,%s"
+                    mime (base64-encode-string (buffer-string) t)))
+        (error nil)))))
 
 (defun pretty-view-html--inline-assets (html base-directory)
   "Return HTML with local image sources under BASE-DIRECTORY embedded.
@@ -151,18 +154,19 @@ Remote URLs, unreadable files, and files over
   (if (not pretty-view-inline-images)
       html
     (replace-regexp-in-string
-     "\\(<img[^>]*\\bsrc=\"\\)\\([^\"]+\\)\\(\"\\)"
+     "\\(<img[^>]*?[ \t\n]\\)\\(src=\"\\)\\([^\"]*\\)\\(\"\\)"
      (lambda (match)
-       (let ((src (match-string 2 match)))
+       (let ((src (match-string 3 match)))
          (if (string-match-p "\\`\\(?:[a-z][a-z0-9+.-]*:\\|//\\)" src)
              match
            (let* ((file (expand-file-name src base-directory))
                   (uri (pretty-view-html--data-uri file)))
              (concat (match-string 1 match)
+                     (match-string 2 match)
                      (cond (uri uri)
                            ((file-readable-p file) (concat "file://" file))
                            (t src))
-                     (match-string 3 match))))))
+                     (match-string 4 match))))))
      html t)))
 
 ;; Live-reload script
@@ -193,7 +197,7 @@ Remote URLs, unreadable files, and files over
   "Wrap BODY in a complete HTML document and return it.
 TITLE names the document, BASE-DIRECTORY resolves relative image paths,
 and LIVE non-nil embeds the reload script."
-  (let* ((body (seq-reduce (lambda (acc fn) (funcall fn acc))
+  (let* ((body (seq-reduce (lambda (acc fn) (or (funcall fn acc) acc))
                            pretty-view-body-filter-functions body))
          (body (pretty-view-html--inline-assets
                 body (or base-directory default-directory)))

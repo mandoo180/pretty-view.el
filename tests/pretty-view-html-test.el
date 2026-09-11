@@ -135,6 +135,39 @@
                             (pretty-view-html--inline-assets
                              "<img src=\"x.png\" />" "/tmp")))))
 
+(ert-deftest pretty-view-html-test-inline-skips-a-directory ()
+  "A directory named like an image must not signal."
+  (let* ((dir (make-temp-file "pv-assets" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "dirimg.png" dir))
+          (let ((html (pretty-view-html--inline-assets
+                       "<img src=\"dirimg.png\" />" dir)))
+            (should (string-match-p "dirimg.png" html))
+            (should-not (string-match-p "base64" html))))
+      (delete-directory dir t))))
+
+(ert-deftest pretty-view-html-test-inline-targets-the-real-src ()
+  "data-src must not be mistaken for src."
+  (let* ((dir (make-temp-file "pv-assets" t))
+         (png (expand-file-name "real.png" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file png (set-buffer-multibyte nil) (insert "\211PNG\r\n"))
+          (let ((html (pretty-view-html--inline-assets
+                       "<img src=\"real.png\" data-src=\"foo.png\" />" dir)))
+            (should (string-match-p "src=\"data:image/png;base64," html))
+            (should (string-match-p "data-src=\"foo.png\"" html))))
+      (delete-directory dir t))))
+
+(ert-deftest pretty-view-html-test-body-filter-returning-nil-is-a-no-op ()
+  (let ((pretty-view-body-filter-functions
+         (list (lambda (b) (concat b "<!--1-->"))
+               (lambda (_b) nil)
+               (lambda (b) (concat b "<!--2-->")))))
+    (let ((html (pretty-view-html-document "x")))
+      (should (string-match-p "<!--1--><!--2-->" html)))))
+
 (ert-deftest pretty-view-html-test-live-script-present-only-when-asked ()
   (should-not (string-match-p "location.reload"
                               (pretty-view-html-document "x")))
