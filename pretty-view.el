@@ -48,6 +48,15 @@
 (defvar pretty-view-live-mode nil
   "Minor mode variable for live rendering.")
 
+(defcustom pretty-view-own-toc-modes '(org-mode)
+  "Major modes whose converters emit their own table of contents.
+For a buffer whose mode derives from one of these, the document shell
+adds no table of contents of its own, and `pretty-view-toc' does not
+apply -- the source format's own option governs, such as Org's
+`#+OPTIONS: toc:'."
+  :type '(repeat symbol)
+  :group 'pretty-view)
+
 (defun pretty-view-markdown-body ()
   "Return the current buffer rendered as Markdown."
   (pretty-view-render-document (pretty-view-gfm-parse (buffer-string))))
@@ -63,7 +72,13 @@
   "Map a major mode to the function producing its HTML body.
 Each function is called with no arguments in the source buffer.  Modes
 are matched with `derived-mode-p', so `gfm-mode' reaches the
-`markdown-mode' entry.  A buffer matching nothing is rendered as text."
+`markdown-mode' entry.  A buffer matching nothing is rendered as text.
+
+Entries are tried in order; the first whose mode the buffer derives from
+wins.  Prepend an entry to override a built-in (e.g. a custom markdown
+renderer).  WARNING: an entry for an ancestor mode also matches modes
+derived from it, so an entry for `outline-mode' would silently override
+`org-mode' if placed before it."
   :type '(alist :key-type symbol :value-type function)
   :group 'pretty-view)
 
@@ -91,11 +106,13 @@ it does not exist.  Does not open a browser."
   (let* ((base default-directory)
          (title (pretty-view--title))
          (body (pretty-view-body))
+         (suppress-toc (seq-some (lambda (mode) (derived-mode-p mode))
+                                 pretty-view-own-toc-modes))
          (html (pretty-view-html-document body
                                           :title title
                                           :base-directory base
                                           :live live
-                                          :toc (if (derived-mode-p 'org-mode) 'none pretty-view-toc))))
+                                          :toc (if suppress-toc 'none pretty-view-toc))))
     (make-directory (file-name-directory file) t)
     (let ((coding-system-for-write 'utf-8-unix))
       (with-temp-file file (insert html)))
@@ -114,8 +131,12 @@ it does not exist.  Does not open a browser."
 (defun pretty-view-file (file)
   "Render FILE to HTML and open it in a browser."
   (interactive "fFile to render: ")
-  (with-current-buffer (find-file-noselect file)
-    (pretty-view)))
+  (let ((was-open (get-file-buffer file)))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (pretty-view))
+      (when (and (not was-open) (get-file-buffer file) (not (buffer-modified-p (get-file-buffer file))))
+        (kill-buffer (get-file-buffer file))))))
 
 ;;;###autoload
 (defun pretty-view-export (file)
@@ -145,8 +166,14 @@ it does not exist.  Does not open a browser."
 (defun pretty-view--live-update ()
   "Regenerate this buffer's rendered file.  Used by `pretty-view-live-mode'."
   (when pretty-view-live-mode
-    (pretty-view-render-buffer-to-file
-     (pretty-view-browser-output-file (pretty-view--source-name)) t)))
+    (condition-case err
+        (pretty-view-render-buffer-to-file
+         (pretty-view-browser-output-file (pretty-view--source-name)) t)
+      (quit (signal 'quit nil))
+      (error
+       (message "pretty-view: render failed (%s: %s) — output: %s"
+                (car err) (cadr err)
+                (pretty-view-browser-output-file (pretty-view--source-name)))))))
 
 ;;;###autoload
 (define-minor-mode pretty-view-live-mode

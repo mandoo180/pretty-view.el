@@ -153,5 +153,35 @@
                    :toc (if (derived-mode-p 'org-mode) 'none pretty-view-toc))))
         (should (string-match-p "class=\"pv-toc\"" html))))))
 
+(ert-deftest pretty-view-test-live-update-cannot-break-save ()
+  "A failing render must not propagate out of after-save-hook."
+  (let ((tmp (make-temp-file "pv-src" nil ".txt")))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect tmp)
+          (insert "x")
+          (pretty-view-live-mode 1)
+          (cl-letf (((symbol-function 'pretty-view-body)
+                     (lambda () (error "boom")))
+                    ((symbol-function 'message) (lambda (&rest _) nil)))
+            (should (progn (save-buffer) t)))
+          (set-buffer-modified-p nil)
+          (kill-buffer))
+      (delete-file tmp))))
+
+(ert-deftest pretty-view-test-own-toc-modes-suppresses-toc ()
+  "Modes in pretty-view-own-toc-modes should suppress the shell TOC."
+  (define-derived-mode pv-test-mode text-mode "PV-Test")
+  (let ((pretty-view-toc t)
+        (pretty-view-own-toc-modes '(pv-test-mode)))
+    (pv-in-mode pv-test-mode "# One\n# Two\n"
+      (let ((html (pretty-view-html-document
+                   (pretty-view-body)
+                   :title "T"
+                   :toc (if (seq-some (lambda (m) (derived-mode-p m))
+                                      pretty-view-own-toc-modes)
+                           'none
+                         pretty-view-toc))))
+        (should-not (string-match-p "class=\"pv-toc\"" html))))))
+
 (provide 'pretty-view-test)
 ;;; pretty-view-test.el ends here
