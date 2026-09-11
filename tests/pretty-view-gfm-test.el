@@ -271,5 +271,61 @@
     (should (equal (plist-get (nth 0 blocks) :raw) "text"))
     (should (eq (pv-test-type (nth 1 blocks)) 'table))))
 
+(ert-deftest pretty-view-gfm-test-html-block ()
+  (let ((node (pv-test-block "<div class=\"x\">\n  <p>hi</p>\n</div>")))
+    (should (eq (pv-test-type node) 'html-block))
+    (should (string-match-p "<div" (plist-get node :html)))
+    (should (string-match-p "</div>" (plist-get node :html)))))
+
+(ert-deftest pretty-view-gfm-test-html-block-ends-at-blank-line ()
+  (let ((blocks (pv-test-blocks "<div>\n</div>\n\nafter")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 1 blocks)) 'paragraph))))
+
+(ert-deftest pretty-view-gfm-test-html-comment-is-a-block ()
+  (should (eq (pv-test-type (pv-test-block "<!-- note -->")) 'html-block)))
+
+(ert-deftest pretty-view-gfm-test-link-reference-definition-produces-no-node ()
+  (let ((blocks (pv-test-blocks "[ref]: https://example.com\n\ntext")))
+    (should (= (length blocks) 1))
+    (should (eq (pv-test-type (car blocks)) 'paragraph))))
+
+(ert-deftest pretty-view-gfm-test-link-reference-is-recorded ()
+  (pretty-view-gfm-parse "[Ref]: https://example.com \"T\"")
+  (should (equal (pretty-view-gfm-link-ref "ref")
+                 '("https://example.com" . "T"))))
+
+(ert-deftest pretty-view-gfm-test-link-reference-label-is-case-insensitive ()
+  (pretty-view-gfm-parse "[MiXeD]: https://example.com")
+  (should (pretty-view-gfm-link-ref "mixed"))
+  (should (pretty-view-gfm-link-ref "MIXED")))
+
+(ert-deftest pretty-view-gfm-test-footnote-definition ()
+  (let ((node (pv-test-block "[^a]: the note")))
+    (should (eq (pv-test-type node) 'footnote-definition))
+    (should (equal (plist-get node :label) "a"))
+    (should (equal (plist-get (car (plist-get node :children)) :raw)
+                   "the note"))))
+
+(ert-deftest pretty-view-gfm-test-footnote-definition-continuation ()
+  (let* ((node (pv-test-block "[^a]: first\n    second"))
+         (para (car (plist-get node :children))))
+    (should (equal (plist-get para :raw) "first\nsecond"))))
+
+(ert-deftest pretty-view-gfm-test-footnote-is-not-a-link-reference ()
+  (should (eq (pv-test-type (pv-test-block "[^a]: x")) 'footnote-definition)))
+
+(ert-deftest pretty-view-gfm-test-footnote-definition-interrupts-paragraph ()
+  (let ((blocks (pv-test-blocks "text\n[^a]: note")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 0 blocks)) 'paragraph))
+    (should (eq (pv-test-type (nth 1 blocks)) 'footnote-definition))))
+
+(ert-deftest pretty-view-gfm-test-html-block-interrupts-paragraph ()
+  (let ((blocks (pv-test-blocks "text\n<div>\n</div>")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 0 blocks)) 'paragraph))
+    (should (eq (pv-test-type (nth 1 blocks)) 'html-block))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here

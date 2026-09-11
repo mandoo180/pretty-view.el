@@ -74,6 +74,28 @@ an ordered item, group 4 the first line of content.")
 (defconst pretty-view-gfm--task-re "\\`\\[\\([ xX]\\)\\][ \t]+\\(.*\\)\\'"
   "Match a GFM task list marker at the start of item content.")
 
+(defconst pretty-view-gfm--html-block-re "\\` \\{0,3\\}<\\(?:[a-zA-Z/!?]\\)"
+  "Match a line that opens an HTML block.")
+
+(defconst pretty-view-gfm--link-def-re
+  "\\` \\{0,3\\}\\[\\([^]^][^]]*\\|\\)\\][ \t]*:[ \t]*\\(\\S-+\\)\\(?:[ \t]+[\"'(]\\(.*?\\)[\"')]\\)?[ \t]*\\'"
+  "Match a link reference definition.
+Group 1 is the label, group 2 the destination, group 3 the title.")
+
+(defconst pretty-view-gfm--footnote-def-re
+  "\\` \\{0,3\\}\\[\\^\\([^]]+\\)\\][ \t]*:[ \t]*\\(.*\\)\\'"
+  "Match a footnote definition.  Group 1 is the label, group 2 the text.")
+
+(defvar pretty-view-gfm--link-refs nil
+  "Hash table of link reference definitions for the document being parsed.
+Maps a downcased label to a cons of href and title.  Bound by
+`pretty-view-gfm-parse'.")
+
+(defun pretty-view-gfm-link-ref (label)
+  "Return the definition for LABEL as a cons of href and title, or nil."
+  (and pretty-view-gfm--link-refs
+       (gethash (downcase (string-trim label)) pretty-view-gfm--link-refs)))
+
 (defun pretty-view-gfm--dedent (line width)
   "Return LINE with up to WIDTH leading spaces removed."
   (let ((i 0))
@@ -279,15 +301,44 @@ Return a cons of the node and the remaining lines."
     (cons (list :type 'table :align align :children (nreverse rows))
           rest)))
 
+(defun pretty-view-gfm--take-html-block (lines)
+  "Consume an HTML block from LINES.
+Return a cons of the node and the remaining lines."
+  (let ((body nil) (rest lines))
+    (while (and rest (not (pretty-view-gfm--blank-p (car rest))))
+      (push (car rest) body)
+      (setq rest (cdr rest)))
+    (cons (list :type 'html-block :html (string-join (nreverse body) "\n"))
+          rest)))
+
+(defun pretty-view-gfm--take-footnote (lines)
+  "Consume a footnote definition from LINES.
+Return a cons of the node and the remaining lines."
+  (string-match pretty-view-gfm--footnote-def-re (car lines))
+  (let ((label (match-string 1 (car lines)))
+        (body (list (match-string 2 (car lines))))
+        (rest (cdr lines)))
+    ;; Indented lines continue the note.
+    (while (and rest (string-match-p "\\`\\(    \\|\t\\)" (car rest)))
+      (push (pretty-view-gfm--dedent (car rest) 4) body)
+      (setq rest (cdr rest)))
+    (cons (list :type 'footnote-definition :label label
+                :children (pretty-view-gfm--parse-blocks (nreverse body)))
+          rest)))
+
 (defun pretty-view-gfm--block-start-p (line)
   "Return non-nil when LINE begins a new block.
 A line starts a block if it matches thematic break, ATX heading,
-fence, list item, or block quote patterns."
+fence, list item, block quote, HTML block, footnote definition, or
+link reference definition patterns."
   (or (string-match-p pretty-view-gfm--thematic-break-re line)
       (string-match-p pretty-view-gfm--atx-re line)
       (string-match-p pretty-view-gfm--fence-re line)
       (string-match-p pretty-view-gfm--list-item-re line)
-      (string-match-p pretty-view-gfm--quote-re line)))
+      (string-match-p pretty-view-gfm--quote-re line)
+      (string-match-p pretty-view-gfm--footnote-def-re line)
+      (string-match-p pretty-view-gfm--link-def-re line)
+      (string-match-p pretty-view-gfm--html-block-re line)))
 
 (defun pretty-view-gfm--paragraph-end (lines)
   "Return the number of leading LINES belonging to one paragraph.
@@ -367,6 +418,23 @@ Stops before a blank line or a construct that interrupts a paragraph."
           (let ((result (pretty-view-gfm--take-table lines)))
             (push (car result) nodes)
             (setq lines (cdr result))))
+         ;; Footnote definition.
+         ((string-match-p pretty-view-gfm--footnote-def-re line)
+          (let ((result (pretty-view-gfm--take-footnote lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
+         ;; Link reference definition: recorded, never rendered.
+         ((string-match pretty-view-gfm--link-def-re line)
+          (when pretty-view-gfm--link-refs
+            (puthash (downcase (match-string 1 line))
+                     (cons (match-string 2 line) (match-string 3 line))
+                     pretty-view-gfm--link-refs))
+          (setq lines (cdr lines)))
+         ;; HTML block.
+         ((string-match-p pretty-view-gfm--html-block-re line)
+          (let ((result (pretty-view-gfm--take-html-block lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
          ;; Paragraph.
          (t
           (let* ((n (pretty-view-gfm--paragraph-end lines))
@@ -377,6 +445,7 @@ Stops before a blank line or a construct that interrupts a paragraph."
 
 (defun pretty-view-gfm-parse (string)
   "Parse STRING as GitHub Flavored Markdown and return a document node."
+  (setq pretty-view-gfm--link-refs (make-hash-table :test #'equal))
   (let ((lines (split-string (string-trim-right string "\n") "\n")))
     (list :type 'document
           :children (if (equal lines '(""))
