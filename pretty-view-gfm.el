@@ -649,37 +649,43 @@ Unmatched delimiter nodes degrade to text."
                 (setq opener (1- opener)))
               (when found
                 (let* ((char (plist-get node :char))
-                       (avail (min (plist-get node :count)
-                                   (plist-get (aref nodes found) :count)))
-                       (use (cond ((eq char ?~) (if (>= avail 2) 2 0))
-                                  ((>= avail 2) 2)
-                                  (t 1))))
+                       (closer-count (plist-get node :count))
+                       (opener-count (plist-get (aref nodes found) :count))
+                       (use (cond
+                             ;; Strikethrough: must have at least 2 from each
+                             ((eq char ?~)
+                              (if (and (>= closer-count 2) (>= opener-count 2)) 2 0))
+                             ;; Emphasis/strong: match only if counts align
+                             ;; Strong: both must have >= 2
+                             ;; Emphasis: both must have == 1
+                             ((and (>= closer-count 2) (>= opener-count 2))
+                              2)
+                             ((and (= closer-count 1) (= opener-count 1))
+                              1)
+                             (t 0))))
                   (when (> use 0)
                     (let ((type (cond ((eq char ?~) 'strikethrough)
                                       ((= use 2) 'strong)
                                       (t 'emphasis)))
                           (inner nil)
-                          (leftover-before nil))
+                          (opener-fully-consumed nil))
                       (let ((k (1+ found)))
                         (while (< k closer)
                           (when (aref nodes k) (push (aref nodes k) inner))
                           (aset nodes k nil)
                           (setq k (1+ k))))
-                      ;; Save the opener's leftover before consuming.
-                      (let* ((opener-node (aref nodes found))
-                             (opener-left (- (plist-get opener-node :count) use)))
-                        (when (> opener-left 0)
-                          (setq leftover-before
-                                (pretty-view-gfm--text
-                                 (make-string opener-left (plist-get opener-node :char))))))
+                      ;; Check if opener will be fully consumed.
+                      (let ((opener-count (plist-get (aref nodes found) :count)))
+                        (setq opener-fully-consumed (= opener-count use)))
                       (pretty-view-gfm--consume-delimiter nodes found use)
                       (pretty-view-gfm--consume-delimiter nodes closer use)
-                      ;; Build inner with opener's leftover if present.
-                      (let ((inner-final (nreverse inner)))
-                        (when leftover-before
-                          (setq inner-final (cons leftover-before inner-final)))
-                        (aset nodes found
-                              (list :type type :children inner-final)))
+                      ;; Place the emphasis node:
+                      ;; - If opener was fully consumed, put it at found
+                      ;; - If opener has a remainder, put it at found+1
+                      ;;   (the leftover delimiter stays at found and can match again)
+                      (let ((target-slot (if opener-fully-consumed found (1+ found))))
+                        (aset nodes target-slot
+                              (list :type type :children (nreverse inner))))
                       ;; Re-examine this position: a partly consumed
                       ;; closer may still close another opener.
                       (setq closer (1- closer)))))))))

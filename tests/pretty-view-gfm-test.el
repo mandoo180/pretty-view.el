@@ -539,20 +539,33 @@
     (should (eq (pv-test-type span) 'code-span))
     (should (equal (plist-get span :code) "*x*"))))
 
-(ert-deftest pretty-view-gfm-test-triple-delimiter-preserves-leftovers ()
-  "***a*** should produce strong with a leading asterisk and a trailing one.
-When matching ***...*** as strong, one asterisk remains on each side
-and must be preserved as text, not silently dropped."
-  (let* ((node (pv-test-inline "***a***"))
-         (inner (plist-get node :children)))
+(ert-deftest pretty-view-gfm-test-triple-delimiter-nests ()
+  "***a*** is em wrapping strong, with no stray asterisk anywhere."
+  (let ((node (pv-test-inline "***a***")))
+    (should (eq (pv-test-type node) 'emphasis))
+    (let ((inner (car (plist-get node :children))))
+      (should (eq (pv-test-type inner) 'strong))
+      (should (equal (pv-test-text inner) "a"))))
+  (should (equal (pv-test-text (pv-test-block "***a***")) "a")))
+
+(ert-deftest pretty-view-gfm-test-emphasis-nested-in-strong-without-spaces ()
+  (let ((node (pv-test-inline "**a*b*c**")))
     (should (eq (pv-test-type node) 'strong))
-    ;; The strong node's children start with a text node containing the
-    ;; leftover asterisk from the opener, then the content 'a'.
-    (should (eq (pv-test-type (car inner)) 'text))
-    (should (equal (plist-get (car inner) :value) "*"))
-    ;; The inline level contains a trailing text node for the closer's leftover.
-    (should (equal (pv-test-text (pv-test-block "***a***"))
-                   "*a*"))))
+    (should (equal (pv-test-text node) "abc"))
+    (should (seq-find (lambda (n) (eq (pv-test-type n) 'emphasis))
+                      (plist-get node :children)))))
+
+(ert-deftest pretty-view-gfm-test-strong-nested-in-emphasis ()
+  (let ((node (pv-test-inline "*a**b**c*")))
+    (should (eq (pv-test-type node) 'emphasis))
+    (should (equal (pv-test-text node) "abc"))
+    (should (seq-find (lambda (n) (eq (pv-test-type n) 'strong))
+                      (plist-get node :children)))))
+
+(ert-deftest pretty-view-gfm-test-no-stray-delimiters-in-text ()
+  "No delimiter character may survive as rendered text in these inputs."
+  (dolist (md '("***a***" "**a*b*c**" "*a**b**c*" "~~x~~" "**a *b* c**"))
+    (should-not (string-match-p "[*~]" (pv-test-text (pv-test-block md))))))
 
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here
