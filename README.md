@@ -16,6 +16,15 @@ Use `use-package` with `:vc` to install from GitHub:
   :bind (("C-c C-v" . pretty-view)))
 ```
 
+**Note on Emacs 29.1:** The `:vc` keyword requires Emacs 30 or newer (or use-package 2.4.5+ from ELPA). On Emacs 29.1, use `M-x package-vc-install` instead:
+
+```
+M-x package-vc-install RET
+https://github.com/mandoo180/pretty-view.el RET
+```
+
+Then use the declaration above, but remove the `:vc` line.
+
 The package requires Emacs 29.1 and has no external dependencies beyond built-in libraries (`org`, `cl-lib`, `seq`).
 
 ## Commands
@@ -32,36 +41,40 @@ On an unsaved buffer, `pretty-view` uses the buffer text and names the output af
 
 ## Themes
 
-Five bundled themes are included: `github-light` (the default), `github-dark`, `sepia`, `nord`, and `cyberpunk`. Set `pretty-view-theme` to one of these symbols, or set it to `'auto` to follow the operating system's light/dark mode preference.
+Five bundled themes are included:
+
+- **`github-light`** — The default. GitHub's light mode with cool grays and high contrast.
+- **`github-dark`** — GitHub's dark mode. Pairs with `github-light` under `'auto` mode.
+- **`sepia`** — Warm tones on paper-like background, best for long reading sessions.
+- **`nord`** — Arctic, north-bluish color palette inspired by the Nord theme.
+- **`cyberpunk`** — Neon synthwave aesthetic.
+
+Every bundled theme passes WCAG AA contrast requirements on its own background. Set `pretty-view-theme` to one of these symbols, or set it to `'auto` to follow the operating system's light/dark mode preference.
 
 Each theme is defined with `pretty-view-define-theme` using a palette of color and typography slots. For example:
 
 ```elisp
 (pretty-view-define-theme 'my-theme
-  :bg "#ffffff"              ; Background color
-  :fg "#1f2328"              ; Foreground text color
-  :muted "#59636e"           ; Muted text (metadata, comments)
-  :accent "#0969da"          ; Accent color (links)
-  :border "#d1d9e0"          ; Borders
-  :code-bg "#f6f8fa"         ; Code block background
-  :code-fg "#1f2328"         ; Code block text
-  :keyword "#cf222e"         ; Code: keyword (red)
-  :string "#0a3069"          ; Code: string (blue)
-  :comment "#59636e"         ; Code: comment (gray)
-  :function "#8250df"        ; Code: function name (purple)
-  :constant "#0550ae"        ; Code: constant (teal)
-  :type "#953800"            ; Code: type/class (orange)
-  :variable "#1f2328"        ; Code: variable (black)
-  :builtin "#0550ae"         ; Code: built-in (teal)
-  :body-font "system-ui, -apple-system, sans-serif"  ; Body typeface
-  :mono-font "menlo, monospace"                       ; Code typeface
-  :measure "46rem"           ; Max line width
-  :dark-variant 'my-theme-dark  ; Paired dark theme (for `'auto`)
-  :extra-css "..."           ; Additional custom CSS
-)
+  :bg "#ffffff" :fg "#1f2328" :muted "#59636e"
+  :accent "#0969da" :accent-muted "#ddf4ff"
+  :border "#d1d9e0" :rule "#d1d9e0"
+  :code-bg "#f6f8fa" :code-fg "#1f2328" :code-border "#d1d9e0"
+  :quote-border "#d1d9e0" :quote-fg "#59636e"
+  :table-stripe "#f6f8fa"
+  :mark-bg "#fff8c5"
+  :keyword "#cf222e" :string "#0a3069" :comment "#59636e"
+  :doc "#0a3069" :function "#8250df" :variable "#1f2328"
+  :type "#953800" :constant "#0550ae" :builtin "#0550ae"
+  :preprocessor "#8250df" :operator "#1f2328"
+  :escape "#0550ae" :warning "#9a6700"
+  :body-font "system-ui, -apple-system, sans-serif"
+  :mono-font "menlo, monospace"
+  :measure "46rem" :radius "6px" :line-height "1.65"
+  :dark-variant 'my-theme-dark
+  :extra-css nil)
 ```
 
-Slots not specified inherit from the default palette. An unknown slot signals an error at definition time, preventing silent typos.
+All 34 palette slots are listed above. Slots not specified inherit from the default palette. An unknown slot signals an error at definition time, preventing silent typos.
 
 Under `'auto`, both a light and dark theme are emitted. The dark one is wrapped in `@media (prefers-color-scheme: dark)`, so the page follows the OS preference without user intervention.
 
@@ -247,7 +260,7 @@ In addition to the extension points above, the following variables control the p
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `pretty-view-allow-raw-html` | `t` | When non-nil, pass raw HTML and `javascript:` URLs through unchanged. See Threat Model section |
+| `pretty-view-allow-raw-html` | `t` | When non-nil, pass raw HTML blocks through unchanged; when nil, escape them. See Threat Model section |
 | `pretty-view-text-as-markdown` | nil | When non-nil, route plain-text files through the Markdown parser instead of the plain-text converter |
 | `pretty-view-live-interval` | 1.5 | Seconds between browser reloads in `pretty-view-live-mode`; nil disables auto-reload |
 
@@ -277,7 +290,7 @@ By default, rendered HTML is written to:
 | Platform | Directory |
 |----------|-----------|
 | Linux, macOS, Windows | The system temporary directory (`/tmp` on Linux, `/var/folders` on macOS, `%TEMP%` on Windows) |
-| WSL | Windows `%TEMP%` (discovered by asking Windows via `wslpath -w`), or the system temp directory if WSL host detection fails |
+| WSL | Windows `%TEMP%` (discovered by running `cmd.exe /c echo %TEMP%` and converting with `wslpath -u`), or the system temp directory if WSL host detection fails |
 
 This is configured by `pretty-view-output-directory`. The rationale for writing to Windows `TEMP` under WSL is to avoid `\\wsl.localhost\` UNC paths in the browser's address bar, which many browsers do not handle well. The file is still readable on the WSL side.
 
