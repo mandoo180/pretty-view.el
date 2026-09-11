@@ -97,9 +97,10 @@ Return a cons of the node and the remaining lines."
   (let ((body nil) (rest lines))
     (while (and rest
                 (or (string-match-p pretty-view-gfm--quote-re (car rest))
-                    ;; Lazy continuation: an unmarked, non-blank line
-                    ;; continues the quoted paragraph.
-                    (and body (not (pretty-view-gfm--blank-p (car rest))))))
+                    ;; Lazy continuation: an unmarked, non-blank line that does
+                    ;; not start a new block continues the quoted paragraph.
+                    (and body (not (pretty-view-gfm--blank-p (car rest)))
+                         (not (pretty-view-gfm--block-start-p (car rest))))))
       (push (replace-regexp-in-string pretty-view-gfm--quote-re "" (car rest))
             body)
       (setq rest (cdr rest)))
@@ -129,7 +130,6 @@ Return a cons of the node and the remaining lines."
 Return a cons of the node and the remaining lines.  A list ends at the
 first line that is neither a sibling marker, an indented continuation,
 nor a blank line followed by more of the same list."
-  (string-match pretty-view-gfm--list-item-re (car lines))
   (let* ((ordered (pretty-view-gfm--list-ordered-p (car lines)))
          (start (if ordered (string-to-number (match-string 3 (car lines))) 1))
          (first-indent (length (match-string 1 (car lines))))
@@ -212,6 +212,16 @@ Return a cons of the node and the remaining lines."
           ;; Trailing blank lines go back to the caller.
           (nthcdr (- (length lines) (length rest) (length pending)) lines))))
 
+(defun pretty-view-gfm--block-start-p (line)
+  "Return non-nil when LINE begins a new block.
+A line starts a block if it matches thematic break, ATX heading,
+fence, list item, or block quote patterns."
+  (or (string-match-p pretty-view-gfm--thematic-break-re line)
+      (string-match-p pretty-view-gfm--atx-re line)
+      (string-match-p pretty-view-gfm--fence-re line)
+      (string-match-p pretty-view-gfm--list-item-re line)
+      (string-match-p pretty-view-gfm--quote-re line)))
+
 (defun pretty-view-gfm--paragraph-end (lines)
   "Return the number of leading LINES belonging to one paragraph.
 Stops before a blank line or a construct that interrupts a paragraph."
@@ -220,11 +230,7 @@ Stops before a blank line or a construct that interrupts a paragraph."
       (let ((line (nth n lines)))
         (if (and (> n 0)
                  (or (pretty-view-gfm--blank-p line)
-                     (string-match-p pretty-view-gfm--thematic-break-re line)
-                     (string-match-p pretty-view-gfm--atx-re line)
-                     (string-match-p pretty-view-gfm--fence-re line)
-                     (string-match-p pretty-view-gfm--list-item-re line)
-                     (string-match-p pretty-view-gfm--quote-re line)))
+                     (pretty-view-gfm--block-start-p line)))
             (setq stop t)
           (if (pretty-view-gfm--blank-p line)
               (setq stop t)

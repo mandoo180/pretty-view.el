@@ -153,6 +153,30 @@
     (should (eq (pv-test-type (nth 0 (plist-get node :children))) 'heading))
     (should (eq (pv-test-type (nth 1 (plist-get node :children))) 'paragraph))))
 
+(ert-deftest pretty-view-gfm-test-blockquote-not-interrupted-by-plain-text ()
+  "Lazy continuation is for paragraph text, and must keep working."
+  (let ((node (pv-test-block "> a\nlazy text")))
+    (should (eq (pv-test-type node) 'blockquote))
+    (should (equal (plist-get (car (plist-get node :children)) :raw)
+                   "a\nlazy text"))))
+
+(ert-deftest pretty-view-gfm-test-blockquote-interrupted-by-heading ()
+  (let ((blocks (pv-test-blocks "> a\n# heading")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 0 blocks)) 'blockquote))
+    (should (eq (pv-test-type (nth 1 blocks)) 'heading))))
+
+(ert-deftest pretty-view-gfm-test-blockquote-interrupted-by-list ()
+  (let ((blocks (pv-test-blocks "> a\n- item")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 1 blocks)) 'list))))
+
+(ert-deftest pretty-view-gfm-test-blockquote-interrupted-by-thematic-break ()
+  (let ((blocks (pv-test-blocks "> a\n---")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 0 blocks)) 'blockquote))
+    (should (eq (pv-test-type (nth 1 blocks)) 'thematic-break))))
+
 (ert-deftest pretty-view-gfm-test-bullet-list ()
   (let ((node (pv-test-block "- one\n- two")))
     (should (eq (pv-test-type node) 'list))
