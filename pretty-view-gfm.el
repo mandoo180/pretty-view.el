@@ -62,6 +62,18 @@ Lowercases, drops punctuation, and joins words with hyphens."
   "Match an opening code fence.
 Group 1 is the indentation, group 2 the fence, group 3 the info string.")
 
+(defconst pretty-view-gfm--quote-re "\\` \\{0,3\\}> ?"
+  "Match a block quote marker at the start of a line.")
+
+(defconst pretty-view-gfm--list-item-re
+  "\\`\\( \\{0,3\\}\\)\\([-*+]\\|\\([0-9]\\{1,9\\}\\)[.)]\\)\\(?:[ \t]+\\(.*\\)\\|[ \t]*\\'\\)"
+  "Match a list item marker.
+Group 1 is the indentation, group 2 the marker, group 3 the ordinal for
+an ordered item, group 4 the first line of content.")
+
+(defconst pretty-view-gfm--task-re "\\`\\[\\([ xX]\\)\\][ \t]+\\(.*\\)\\'"
+  "Match a GFM task list marker at the start of item content.")
+
 (defun pretty-view-gfm--dedent (line width)
   "Return LINE with up to WIDTH leading spaces removed."
   (let ((i 0))
@@ -78,6 +90,87 @@ Group 1 is the indentation, group 2 the fence, group 3 the info string.")
      (format "\\` \\{0,3\\}%c\\{%d,\\}[ \t]*\\'"
              char (length fence))
      line)))
+
+(defun pretty-view-gfm--take-blockquote (lines)
+  "Consume a block quote from LINES.
+Return a cons of the node and the remaining lines."
+  (let ((body nil) (rest lines))
+    (while (and rest
+                (or (string-match-p pretty-view-gfm--quote-re (car rest))
+                    ;; Lazy continuation: an unmarked, non-blank line
+                    ;; continues the quoted paragraph.
+                    (and body (not (pretty-view-gfm--blank-p (car rest))))))
+      (push (replace-regexp-in-string pretty-view-gfm--quote-re "" (car rest))
+            body)
+      (setq rest (cdr rest)))
+    (cons (list :type 'blockquote
+                :children (pretty-view-gfm--parse-blocks (nreverse body)))
+          rest)))
+
+(defun pretty-view-gfm--list-ordered-p (line)
+  "Return non-nil when LINE opens an ordered list item."
+  (and (string-match pretty-view-gfm--list-item-re line)
+       (match-string 3 line)
+       t))
+
+(defun pretty-view-gfm--item-node (body)
+  "Build a list-item or task-item node from BODY, a list of lines."
+  (let ((first (or (car body) "")))
+    (if (string-match pretty-view-gfm--task-re first)
+        (list :type 'task-item
+              :checked (not (equal (match-string 1 first) " "))
+              :children (pretty-view-gfm--parse-blocks
+                         (cons (match-string 2 first) (cdr body))))
+      (list :type 'list-item
+            :children (pretty-view-gfm--parse-blocks body)))))
+
+(defun pretty-view-gfm--take-list (lines)
+  "Consume one list from LINES.
+Return a cons of the node and the remaining lines.  A list ends at the
+first line that is neither a sibling marker, an indented continuation,
+nor a blank line followed by more of the same list."
+  (string-match pretty-view-gfm--list-item-re (car lines))
+  (let* ((ordered (pretty-view-gfm--list-ordered-p (car lines)))
+         (start (if ordered (string-to-number (match-string 3 (car lines))) 1))
+         (first-indent (length (match-string 1 (car lines))))
+         (items nil) (body nil) (rest lines) (tight t) (pending-blank nil)
+         (done nil))
+    (while (and rest (not done))
+      (let ((line (car rest)))
+        (cond
+         ((pretty-view-gfm--blank-p line)
+          (setq pending-blank t)
+          (setq rest (cdr rest)))
+         ;; A sibling marker at the same nesting level starts a new item.
+         ((and (string-match pretty-view-gfm--list-item-re line)
+               (= (length (match-string 1 line)) first-indent)
+               (eq (and (match-string 3 line) t) (and ordered t)))
+          (let ((content (or (match-string 4 line) "")))
+            (when body
+              (push (pretty-view-gfm--item-node (nreverse body)) items)
+              (when pending-blank (setq tight nil)))
+            (setq body (list content)))
+          (setq pending-blank nil)
+          (setq rest (cdr rest)))
+         ;; An indented line continues the current item.
+         ((and body (string-match-p "\\`\\(  \\| \\{4\\}\\|\t\\)" line))
+          (when pending-blank
+            (setq tight nil)
+            (push "" body)
+            (setq pending-blank nil))
+          (push (pretty-view-gfm--dedent line 2) body)
+          (setq rest (cdr rest)))
+         ;; Lazy continuation of the item's paragraph.
+         ((and body (not pending-blank))
+          (push line body)
+          (setq rest (cdr rest)))
+         (t (setq done t)))))
+    (when body
+      (push (pretty-view-gfm--item-node (nreverse body)) items))
+    (cons (list :type 'list :ordered ordered :start start :tight tight
+                :children (nreverse items))
+          ;; A blank line that ended the list is not part of it.
+          rest)))
 
 (defun pretty-view-gfm--take-fenced (lines)
   "Consume a fenced code block from LINES.
@@ -129,7 +222,9 @@ Stops before a blank line or a construct that interrupts a paragraph."
                  (or (pretty-view-gfm--blank-p line)
                      (string-match-p pretty-view-gfm--thematic-break-re line)
                      (string-match-p pretty-view-gfm--atx-re line)
-                     (string-match-p pretty-view-gfm--fence-re line)))
+                     (string-match-p pretty-view-gfm--fence-re line)
+                     (string-match-p pretty-view-gfm--list-item-re line)
+                     (string-match-p pretty-view-gfm--quote-re line)))
             (setq stop t)
           (if (pretty-view-gfm--blank-p line)
               (setq stop t)
@@ -155,6 +250,11 @@ Stops before a blank line or a construct that interrupts a paragraph."
           (let ((result (pretty-view-gfm--take-fenced lines)))
             (push (car result) nodes)
             (setq lines (cdr result))))
+         ;; Block quote.
+         ((string-match-p pretty-view-gfm--quote-re line)
+          (let ((result (pretty-view-gfm--take-blockquote lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
          ;; Thematic break.
          ((string-match-p pretty-view-gfm--thematic-break-re line)
           (push (list :type 'thematic-break) nodes)
@@ -176,6 +276,12 @@ Stops before a blank line or a construct that interrupts a paragraph."
                  (string-trim line))
                 nodes)
           (setq lines (nthcdr 2 lines)))
+         ;; List.
+         ((and (string-match-p pretty-view-gfm--list-item-re line)
+               (not (string-match-p pretty-view-gfm--thematic-break-re line)))
+          (let ((result (pretty-view-gfm--take-list lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
          ;; Indented code block.  Only when not continuing a paragraph,
          ;; which the paragraph clause has already consumed.
          ((string-prefix-p "    " line)

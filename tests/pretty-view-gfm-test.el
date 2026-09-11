@@ -137,5 +137,69 @@
     (should (= (length blocks) 1))
     (should (eq (pv-test-type (car blocks)) 'paragraph))))
 
+(ert-deftest pretty-view-gfm-test-blockquote ()
+  (let ((node (pv-test-block "> quoted")))
+    (should (eq (pv-test-type node) 'blockquote))
+    (should (eq (pv-test-type (car (plist-get node :children))) 'paragraph))
+    (should (equal (plist-get (car (plist-get node :children)) :raw) "quoted"))))
+
+(ert-deftest pretty-view-gfm-test-blockquote-nested ()
+  (let* ((outer (pv-test-block "> > deep"))
+         (inner (car (plist-get outer :children))))
+    (should (eq (pv-test-type inner) 'blockquote))))
+
+(ert-deftest pretty-view-gfm-test-blockquote-holds-blocks ()
+  (let ((node (pv-test-block "> # head\n> body")))
+    (should (eq (pv-test-type (nth 0 (plist-get node :children))) 'heading))
+    (should (eq (pv-test-type (nth 1 (plist-get node :children))) 'paragraph))))
+
+(ert-deftest pretty-view-gfm-test-bullet-list ()
+  (let ((node (pv-test-block "- one\n- two")))
+    (should (eq (pv-test-type node) 'list))
+    (should (null (plist-get node :ordered)))
+    (should (= (length (plist-get node :children)) 2))
+    (should (eq (pv-test-type (car (plist-get node :children))) 'list-item))))
+
+(ert-deftest pretty-view-gfm-test-bullet-list-markers ()
+  (dolist (m '("-" "*" "+"))
+    (should (eq (pv-test-type (pv-test-block (concat m " x"))) 'list))))
+
+(ert-deftest pretty-view-gfm-test-ordered-list ()
+  (let ((node (pv-test-block "1. one\n2. two")))
+    (should (eq (pv-test-type node) 'list))
+    (should (plist-get node :ordered))
+    (should (= (plist-get node :start) 1))))
+
+(ert-deftest pretty-view-gfm-test-ordered-list-start ()
+  (should (= (plist-get (pv-test-block "5. five") :start) 5)))
+
+(ert-deftest pretty-view-gfm-test-nested-list ()
+  (let* ((outer (pv-test-block "- a\n  - b"))
+         (item (car (plist-get outer :children)))
+         (inner (nth 1 (plist-get item :children))))
+    (should (eq (pv-test-type inner) 'list))))
+
+(ert-deftest pretty-view-gfm-test-tight-and-loose-lists ()
+  (should (plist-get (pv-test-block "- a\n- b") :tight))
+  (should-not (plist-get (pv-test-block "- a\n\n- b") :tight)))
+
+(ert-deftest pretty-view-gfm-test-task-list-item ()
+  (let* ((node (pv-test-block "- [ ] todo\n- [x] done"))
+         (items (plist-get node :children)))
+    (should (eq (pv-test-type (nth 0 items)) 'task-item))
+    (should-not (plist-get (nth 0 items) :checked))
+    (should (plist-get (nth 1 items) :checked))
+    (should (equal (plist-get (car (plist-get (nth 0 items) :children)) :raw)
+                   "todo"))))
+
+(ert-deftest pretty-view-gfm-test-task-list-uppercase-x ()
+  (let ((item (car (plist-get (pv-test-block "- [X] done") :children))))
+    (should (plist-get item :checked))))
+
+(ert-deftest pretty-view-gfm-test-list-does-not-swallow-following-paragraph ()
+  (let ((blocks (pv-test-blocks "- a\n\nafter")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 1 blocks)) 'paragraph))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here
