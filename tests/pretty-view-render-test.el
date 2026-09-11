@@ -36,5 +36,48 @@
 (ert-deftest pretty-view-render-test-escape-attribute ()
   (should (equal (pretty-view-escape-attribute "a\"b") "a&quot;b")))
 
+(ert-deftest pretty-view-render-test-fontified-code-emits-spans ()
+  (let ((html (pretty-view-render-fontified-code "(defun foo ())" "elisp")))
+    (should (string-match-p "<span class=\"pv-keyword\">defun</span>" html))
+    (should (string-match-p "foo" html))))
+
+(ert-deftest pretty-view-render-test-fontified-code-escapes ()
+  (let ((html (pretty-view-render-fontified-code "a < b & c" nil)))
+    (should (string-match-p "&lt;" html))
+    (should (string-match-p "&amp;" html))
+    (should-not (string-match-p "[^&]< " html))))
+
+(ert-deftest pretty-view-render-test-fontified-code-unknown-language ()
+  "An unknown language yields escaped plain text, not an error."
+  (let ((html (pretty-view-render-fontified-code "x < y" "no-such-lang")))
+    (should (equal html "x &lt; y"))))
+
+(ert-deftest pretty-view-render-test-fontified-code-nil-language ()
+  (should (equal (pretty-view-render-fontified-code "plain" nil) "plain")))
+
+(ert-deftest pretty-view-render-test-code-mode-alist-alias ()
+  (let ((pretty-view-code-mode-alist '(("elisp" . emacs-lisp-mode))))
+    (should (eq (pretty-view-render--code-mode "elisp") 'emacs-lisp-mode))))
+
+(ert-deftest pretty-view-render-test-code-mode-suffix-fallback ()
+  "A language with no alist entry falls back to LANG-mode."
+  (let ((pretty-view-code-mode-alist nil))
+    (should (eq (pretty-view-render--code-mode "emacs-lisp") 'emacs-lisp-mode))
+    (should (null (pretty-view-render--code-mode "definitely-not-a-mode")))))
+
+(ert-deftest pretty-view-render-test-face-normalization ()
+  "A face property may be a symbol, a list, or an anonymous plist."
+  (should (equal (pretty-view-render--face-class 'font-lock-keyword-face)
+                 "pv-keyword"))
+  (should (equal (pretty-view-render--face-class
+                  '(font-lock-keyword-face default))
+                 "pv-keyword"))
+  (should (null (pretty-view-render--face-class '(:foreground "red"))))
+  (should (null (pretty-view-render--face-class nil))))
+
+(ert-deftest pretty-view-render-test-fontified-code-preserves-newlines ()
+  (let ((html (pretty-view-render-fontified-code "a\nb\n" nil)))
+    (should (equal html "a\nb\n"))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here
