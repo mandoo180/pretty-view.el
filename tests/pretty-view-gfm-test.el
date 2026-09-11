@@ -55,8 +55,7 @@
 (ert-deftest pretty-view-gfm-test-paragraph-joins-lines ()
   (let ((node (pv-test-block "one\ntwo")))
     (should (eq (pv-test-type node) 'paragraph))
-    (let ((kids (plist-get node :children)))
-      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
+    (should (equal (pv-test-text node) "one\ntwo"))))
 
 (ert-deftest pretty-view-gfm-test-blank-line-separates-paragraphs ()
   (let ((blocks (pv-test-blocks "one\n\ntwo")))
@@ -158,8 +157,8 @@
   "Lazy continuation is for paragraph text, and must keep working."
   (let ((node (pv-test-block "> a\nlazy text")))
     (should (eq (pv-test-type node) 'blockquote))
-    (let ((kids (plist-get (car (plist-get node :children)) :children)))
-      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
+    (should (equal (pv-test-text (car (plist-get node :children)))
+                   "a\nlazy text"))))
 
 (ert-deftest pretty-view-gfm-test-blockquote-interrupted-by-heading ()
   (let ((blocks (pv-test-blocks "> a\n# heading")))
@@ -311,8 +310,7 @@
 (ert-deftest pretty-view-gfm-test-footnote-definition-continuation ()
   (let* ((node (pv-test-block "[^a]: first\n    second"))
          (para (car (plist-get node :children))))
-    (let ((kids (plist-get para :children)))
-      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
+    (should (equal (pv-test-text para) "first\nsecond"))))
 
 (ert-deftest pretty-view-gfm-test-footnote-is-not-a-link-reference ()
   (should (eq (pv-test-type (pv-test-block "[^a]: x")) 'footnote-definition)))
@@ -345,8 +343,7 @@
 (ert-deftest pretty-view-gfm-test-footnote-tab-continuation ()
   (let* ((node (pv-test-block "[^a]: first\n\tsecond"))
          (para (car (plist-get node :children))))
-    (let ((kids (plist-get para :children)))
-      (should (seq-find (lambda (n) (eq (pv-test-type n) 'soft-break)) kids)))))
+    (should (equal (pv-test-text para) "first\nsecond"))))
 
 (ert-deftest pretty-view-gfm-test-inline-plain-text ()
   (let ((kids (plist-get (pv-test-block "hello") :children)))

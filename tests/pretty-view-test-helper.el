@@ -34,12 +34,16 @@
   (plist-get node :type))
 
 (defun pv-test-text (node)
-  "Return every `:value' string under NODE concatenated, depth first."
+  "Return every `:value' string under NODE concatenated, depth first.
+Soft-break and line-break nodes contribute a newline."
   (cond
    ((null node) "")
    ((and (listp node) (keywordp (car node)))
-    (concat (or (plist-get node :value) "")
-            (pv-test-text (plist-get node :children))))
+    (let ((type (plist-get node :type)))
+      (concat (cond ((eq type 'soft-break) "\n")
+                    ((eq type 'line-break) "\n")
+                    (t (or (plist-get node :value) "")))
+              (pv-test-text (plist-get node :children)))))
    ((listp node) (mapconcat #'pv-test-text node ""))
    (t "")))
 
