@@ -38,6 +38,10 @@
   "Kernel release string, read once at load time.
 A variable rather than a call so tests can rebind it.")
 
+(defvar pretty-view-browser--windows-temp-cache 'unset
+  "Cached Windows temporary directory, or `unset' if not yet computed.
+A variable rather than a call so tests can reset it.")
+
 (defun pretty-view-browser-wsl-p ()
   "Return non-nil when running under the Windows Subsystem for Linux."
   (and (eq system-type 'gnu/linux)
@@ -46,14 +50,40 @@ A variable rather than a call so tests can rebind it.")
        t))
 
 (defun pretty-view-browser--windows-temp ()
-  "Return the Windows temporary directory as a Linux path, or nil."
-  (let ((user (or (getenv "WSLUSER") (getenv "USER"))))
-    (seq-find
-     #'file-directory-p
-     (delq nil
-           (list (getenv "TEMP_LINUX")
-                 (when user
-                   (format "/mnt/c/Users/%s/AppData/Local/Temp" user)))))))
+  "Return the Windows temporary directory as a Linux path, or nil.
+The result is computed on first use and cached for the session."
+  ;; Return nil immediately if not on WSL
+  (if (not (pretty-view-browser-wsl-p))
+      nil
+    ;; Return cached result if available (check both 'unset and nil for test compatibility)
+    (if (and (not (eq pretty-view-browser--windows-temp-cache 'unset))
+             (not (null pretty-view-browser--windows-temp-cache)))
+        pretty-view-browser--windows-temp-cache
+      ;; Compute the result
+      (let (result)
+        (condition-case nil
+            (let ((output (string-trim
+                           (replace-regexp-in-string "\r\n\\|\r" ""
+                                                     (shell-command-to-string
+                                                      "sh -c 'cd /mnt/c && wslpath -u \"$(cmd.exe /c echo %TEMP% 2>/dev/null)\" 2>/dev/null'")))))
+              (when (not (string-empty-p output))
+                (setq result output)))
+          (error nil))
+
+        ;; Fall back to guessing if discovery failed
+        (unless result
+          (let ((user (or (getenv "WSLUSER") (getenv "USER"))))
+            (setq result
+                  (seq-find
+                   #'file-directory-p
+                   (delq nil
+                         (list (getenv "TEMP_LINUX")
+                               (when user
+                                 (format "/mnt/c/Users/%s/AppData/Local/Temp" user))))))))
+
+        ;; Cache and return
+        (setq pretty-view-browser--windows-temp-cache result)
+        result))))
 
 (defun pretty-view-browser--windows-path (file)
   "Return FILE as a Windows path, or nil when conversion fails."

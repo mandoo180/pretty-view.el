@@ -127,5 +127,32 @@
       (should (equal (pretty-view-browser-default-output-directory)
                      (expand-file-name "pretty-view" temporary-file-directory))))))
 
+(ert-deftest pretty-view-browser-test-windows-temp-is-cached ()
+  "The Windows TEMP lookup runs a subprocess at most once."
+  (let ((calls 0)
+        (pretty-view-browser--windows-temp-cache nil))
+    (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () t))
+              ((symbol-function 'shell-command-to-string)
+               (lambda (&rest _) (setq calls (1+ calls)) "C:\\Temp\r\n")))
+      (pretty-view-browser--windows-temp)
+      (pretty-view-browser--windows-temp)
+      (should (= calls 1)))))
+
+(ert-deftest pretty-view-browser-test-windows-temp-nil-off-wsl ()
+  "Off WSL the lookup runs nothing and returns nil."
+  (let ((pretty-view-browser--windows-temp-cache nil)
+        (ran nil))
+    (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () nil))
+              ((symbol-function 'shell-command-to-string)
+               (lambda (&rest _) (setq ran t) "")))
+      (should (null (pretty-view-browser--windows-temp)))
+      (should-not ran))))
+
+(ert-deftest pretty-view-browser-test-windows-temp-rejects-garbage ()
+  (let ((pretty-view-browser--windows-temp-cache nil))
+    (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () t))
+              ((symbol-function 'shell-command-to-string) (lambda (&rest _) "")))
+      (should (null (pretty-view-browser--windows-temp))))))
+
 (provide 'pretty-view-browser-test)
 ;;; pretty-view-browser-test.el ends here
