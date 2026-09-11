@@ -109,5 +109,28 @@
       (should (equal title "My Doc"))
       (should (null (text-properties-at 0 title))))))
 
+(ert-deftest pretty-view-org-test-title-keeps-operator-characters ()
+  "Stripping markup must not delete ordinary characters."
+  (dolist (raw '("3 + 4 = 7 and 5 + 2 = 7"
+                 "3 * 4 = 12 and 5 * 2 = 10"
+                 "a_b and c_d"
+                 "x = y = z"))
+    (with-temp-buffer
+      (insert (format "#+TITLE: %s\n* H\n" raw))
+      (org-mode)
+      (should (equal (pretty-view-org-title) raw)))))
+
+(ert-deftest pretty-view-org-test-title-drops-emphasis-markers ()
+  (with-temp-buffer
+    (insert "#+TITLE: My *bold* and /italic/ Doc\n* H\n")
+    (org-mode)
+    (should (equal (pretty-view-org-title) "My bold and italic Doc"))))
+
+(ert-deftest pretty-view-org-test-title-link-becomes-its-description ()
+  (with-temp-buffer
+    (insert "#+TITLE: See [[https://e.com][site]] now\n* H\n")
+    (org-mode)
+    (should (equal (pretty-view-org-title) "See site now"))))
+
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here

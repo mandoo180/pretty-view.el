@@ -64,6 +64,25 @@ merged over the inherited `html' backend at export time."
    :parent 'html
    :transcoders pretty-view-org-transcoders))
 
+(defun pretty-view-org--plain-text (data)
+  "Return the plain text content of DATA, an Org secondary string or object.
+Markup is dropped by walking the parse tree rather than by rewriting
+reconstructed Org syntax, which would also delete ordinary characters
+such as the operators in \"3 + 4 = 7\"."
+  (cond
+   ((stringp data) data)
+   ((and (consp data) (symbolp (car data)))
+    ;; An element or object: its contents start after the type and the
+    ;; property plist.
+    (let ((contents (nthcdr 2 data)))
+      (if contents
+          (mapconcat #'pretty-view-org--plain-text contents "")
+        ;; Objects with no contents (timestamps, entities) still carry
+        ;; their source text.
+        (or (org-element-property :raw-value data) ""))))
+   ((listp data) (mapconcat #'pretty-view-org--plain-text data ""))
+   (t "")))
+
 (defun pretty-view-org-title ()
   "Return the `#+TITLE:' of the current Org buffer, or nil.
 Org markup is stripped from the title, so the result is plain text
@@ -73,26 +92,12 @@ text properties."
     (when title-list
       ;; title-list is a secondary string: either a single string,
       ;; or a list of strings and Org objects (for markup).
-      ;; Process the whole list, not just the first element.
-      (let* ((org-syntax (if (stringp title-list)
-                             title-list
-                           (org-element-interpret-data title-list)))
-             ;; Strip Org markup to produce plain text. This preserves the
-             ;; semantic meaning of emphasis (e.g., *bold* -> bold, not *bold*)
-             ;; while producing text suitable for HTML title elements.
-             (text org-syntax))
-        ;; Remove common Org formatting markers
-        (setq text (replace-regexp-in-string "\\*\\([^*\n]+\\)\\*" "\\1" text))
-        (setq text (replace-regexp-in-string "/\\([^/\n]+\\)/" "\\1" text))
-        (setq text (replace-regexp-in-string "_\\([^_\n]+\\)_" "\\1" text))
-        (setq text (replace-regexp-in-string "+\\([^+\n]+\\)+" "\\1" text))
-        (setq text (replace-regexp-in-string "=\\([^=\n]+\\)=" "\\1" text))
-        (setq text (replace-regexp-in-string "~\\([^~\n]+\\)~" "\\1" text))
-        ;; Remove link markup: [[url][desc]] -> desc, [[url]] -> url
-        (setq text (replace-regexp-in-string "\\[\\[\\([^]]+\\)\\]\\[\\([^]]+\\)\\]\\]" "\\2" text))
-        (setq text (replace-regexp-in-string "\\[\\[\\([^]]+\\)\\]\\]" "\\1" text))
+      ;; Extract plain text by walking the parse tree to avoid
+      ;; deleting ordinary characters (e.g., in "3 + 4 = 7").
+      (let ((text (pretty-view-org--plain-text title-list)))
         (unless (string-empty-p (string-trim text))
           (substring-no-properties (string-trim text)))))))
+
 (defun pretty-view-org-body ()
   "Return the current Org buffer exported to an HTML body.
 An export failure is rendered into the body rather than signalled, so a
