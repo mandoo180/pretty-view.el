@@ -48,9 +48,12 @@
     (should (string-match-p "&amp;b=2" html))))
 
 (ert-deftest pretty-view-text-test-collapses-blank-run ()
-  (let ((html (pretty-view-text-body "a\n\n\n\nb")))
-    (should (= 2 (cl-count-if (lambda (_) t)
-                              (split-string html "<p class=\"pv-text\">" t))))))
+  "A run of blank lines, even with whitespace on them, separates two paragraphs."
+  (dolist (input '("a\n\n\n\nb" "a\n\n  \n\t\n\nb" "a\r\n\r\nb"))
+    (let ((html (pretty-view-text-body input)))
+      (should (string-match-p "<p class=\"pv-text\">a</p>" html))
+      (should (string-match-p "<p class=\"pv-text\">b</p>" html))
+      (should-not (string-match-p "<p class=\"pv-text\"></p>" html)))))
 
 (ert-deftest pretty-view-text-test-markdown-opt-in ()
   (let ((pretty-view-text-as-markdown t))

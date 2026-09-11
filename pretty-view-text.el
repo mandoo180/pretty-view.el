@@ -26,6 +26,7 @@
 
 ;;; Code:
 
+(require 'seq)
 (require 'pretty-view-render)
 (require 'pretty-view-gfm)
 
@@ -38,19 +39,29 @@
   "Match a bare URL in plain text.")
 
 (defun pretty-view-text--autolink (escaped)
-  "Return ESCAPED, already HTML-escaped, with bare URLs turned into links."
+  "Return ESCAPED, already HTML-escaped, with bare URLs turned into links.
+URLs are trimmed of trailing punctuation per GFM autolink rules."
   (replace-regexp-in-string
    pretty-view-text--url-re
    (lambda (url)
      ;; URL is escaped text, so it is safe in both the href and the body.
-     (format "<a href=\"%s\">%s</a>" url url))
+     ;; Trim trailing punctuation, being careful with escaped entities.
+     (let ((trimmed (pretty-view-gfm--trim-url-punctuation url)))
+       (format "<a href=\"%s\">%s</a>" trimmed trimmed)))
    escaped t t))
 
 (defun pretty-view-text-body (text)
-  "Return TEXT rendered as an HTML body."
+  "Return TEXT rendered as an HTML body.
+Line endings are normalized to LF, allowing CRLF and old Mac CR line endings."
   (if pretty-view-text-as-markdown
       (pretty-view-render-document (pretty-view-gfm-parse text))
-    (let ((paragraphs (split-string (string-trim text) "\n[ \t]*\n+" t)))
+    ;; Normalize line endings: CRLF -> LF and CR -> LF (old Mac style).
+    (let* ((normalized (replace-regexp-in-string "\r\n" "\n" text))
+           (normalized (replace-regexp-in-string "\r" "\n" normalized))
+           (split-paras (split-string (string-trim normalized) "\n[ \t]*\n+" t))
+           ;; Filter out whitespace-only paragraphs.
+           (paragraphs (seq-filter (lambda (p) (not (string-blank-p (string-trim p))))
+                                    split-paras)))
       (mapconcat
        (lambda (para)
          (format "<p class=\"pv-text\">%s</p>\n"
