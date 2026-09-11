@@ -31,7 +31,7 @@
 ;; Maintainer: Kyeong Soo Choi <kyeongsoo@douzone.com>
 ;; URL: https://github.com/mandoo180/pretty-view.el
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((Emacs "29.1"))
 ;; Keywords: outlines, hypermedia, markdown, org
 
 ;;; Code:

@@ -229,7 +229,7 @@ nested list.")
 (defun pretty-view-render--item-body (node render)
   "Render the children of list item NODE using RENDER.
 A leading paragraph is unwrapped when the item is in a tight list, even
-if the item also holds a nested list. In loose lists, all paragraphs are
+if the item also holds a nested list.  In loose lists, all paragraphs are
 kept wrapped."
   (let ((kids (plist-get node :children)))
     (if pretty-view-render--tight-list
@@ -380,9 +380,7 @@ kept wrapped."
     (image       . pretty-view-render-image)
     (line-break  . pretty-view-render-line-break)
     (soft-break  . pretty-view-render-soft-break))
-  "The renderer table as shipped.  Never customized; used as the fallback
-when a user renderer signals.  Users customize `pretty-view-renderers'
-instead.")
+  "Built-in renderer table used as fallback when user renderers signal.")
 
 (defcustom pretty-view-renderers
   (copy-alist pretty-view-render--default-renderers)

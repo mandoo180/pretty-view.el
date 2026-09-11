@@ -17,9 +17,9 @@
 
 ;;; Commentary:
 
-;; Wraps a body in a complete HTML document. Format-agnostic by construction:
+;; Wraps a body in a complete HTML document.  Format-agnostic by construction:
 ;; the TOC is extracted from rendered headings, so it works identically for
-;; Org and Markdown. Also handles asset inlining and live-reload script.
+;; Org and Markdown.  Also handles asset inlining and live-reload script.
 
 ;;; Code:
 
@@ -79,7 +79,7 @@ string or nil.  This is where to add a KaTeX or Mermaid script tag."
 (defcustom pretty-view-body-filter-functions nil
   "Functions filtering the rendered body.
 Each is called with the body string in the source buffer and returns
-the replacement, applied in order. A return value of nil leaves the body
+the replacement, applied in order.  A return value of nil leaves the body
 unchanged."
   :type 'hook
   :group 'pretty-view)

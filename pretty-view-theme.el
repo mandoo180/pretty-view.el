@@ -233,12 +233,12 @@ Signals when PALETTE names a slot that does not exist or is malformed.
 Values are inserted into CSS verbatim, so they must be valid CSS and
 must not contain `;' or `}'."
   (when (oddp (length palette))
-    (error "pretty-view: malformed palette plist in theme `%s'" name))
+    (error "pretty-view: Malformed palette plist in theme `%s'" name))
   (let ((legal (pretty-view-theme--slots))
         (keys (seq-filter #'keywordp palette)))
     (dolist (key keys)
       (unless (memq key legal)
-        (error "pretty-view: unknown theme slot `%s' in theme `%s'" key name))))
+        (error "pretty-view: Unknown theme slot `%s' in theme `%s'" key name))))
   (puthash name palette pretty-view-theme--registry)
   name)
 
