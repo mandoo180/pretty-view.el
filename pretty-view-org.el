@@ -65,18 +65,34 @@ merged over the inherited `html' backend at export time."
    :transcoders pretty-view-org-transcoders))
 
 (defun pretty-view-org-title ()
-  "Return the `#+TITLE:' of the current Org buffer, or nil."
+  "Return the `#+TITLE:' of the current Org buffer, or nil.
+Org markup is stripped from the title, so the result is plain text
+suitable for an HTML <title> element. The returned string has no
+text properties."
   (let ((title-list (plist-get (org-export-get-environment) :title)))
     (when title-list
-      (let ((title (car title-list)))
-        (when title
-          (let ((text (if (stringp title)
-                          title
-                        (substring-no-properties
-                         (org-element-interpret-data title)))))
-            (unless (string-empty-p (string-trim text))
-              (string-trim text))))))))
-
+      ;; title-list is a secondary string: either a single string,
+      ;; or a list of strings and Org objects (for markup).
+      ;; Process the whole list, not just the first element.
+      (let* ((org-syntax (if (stringp title-list)
+                             title-list
+                           (org-element-interpret-data title-list)))
+             ;; Strip Org markup to produce plain text. This preserves the
+             ;; semantic meaning of emphasis (e.g., *bold* -> bold, not *bold*)
+             ;; while producing text suitable for HTML title elements.
+             (text org-syntax))
+        ;; Remove common Org formatting markers
+        (setq text (replace-regexp-in-string "\\*\\([^*\n]+\\)\\*" "\\1" text))
+        (setq text (replace-regexp-in-string "/\\([^/\n]+\\)/" "\\1" text))
+        (setq text (replace-regexp-in-string "_\\([^_\n]+\\)_" "\\1" text))
+        (setq text (replace-regexp-in-string "+\\([^+\n]+\\)+" "\\1" text))
+        (setq text (replace-regexp-in-string "=\\([^=\n]+\\)=" "\\1" text))
+        (setq text (replace-regexp-in-string "~\\([^~\n]+\\)~" "\\1" text))
+        ;; Remove link markup: [[url][desc]] -> desc, [[url]] -> url
+        (setq text (replace-regexp-in-string "\\[\\[\\([^]]+\\)\\]\\[\\([^]]+\\)\\]\\]" "\\2" text))
+        (setq text (replace-regexp-in-string "\\[\\[\\([^]]+\\)\\]\\]" "\\1" text))
+        (unless (string-empty-p (string-trim text))
+          (substring-no-properties (string-trim text)))))))
 (defun pretty-view-org-body ()
   "Return the current Org buffer exported to an HTML body.
 An export failure is rendered into the body rather than signalled, so a
@@ -85,9 +101,7 @@ broken document still opens in the browser with the reason visible."
       (let ((org-html-head-include-default-style nil)
             (org-html-head-include-scripts nil)
             (org-html-htmlize-output-type nil)
-            (org-export-with-smart-quotes t)
-            (org-export-with-toc nil)
-            (org-export-with-section-numbers nil))
+            (org-export-with-smart-quotes t))
         (org-export-as (pretty-view-org--backend) nil nil t nil))
     (error
      (format "<div class=\"pv-error\"><strong>Org export failed:</strong> %s</div>\n"

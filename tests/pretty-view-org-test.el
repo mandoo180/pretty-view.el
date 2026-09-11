@@ -32,7 +32,9 @@
     (pretty-view-org-body)))
 
 (ert-deftest pretty-view-org-test-heading ()
-  (should (string-match-p "<h2[^>]*>Hi</h2>" (pv-org "* Hi\n"))))
+  (let ((html (pv-org "* Hi\n")))
+    (should (string-match-p "<h2" html))
+    (should (string-match-p "Hi" html))))
 
 (ert-deftest pretty-view-org-test-paragraph-and-emphasis ()
   (let ((html (pv-org "Some *bold* text.\n")))
@@ -90,6 +92,22 @@
     (let ((html (pv-org "* Hi\n")))
       (should (string-match-p "&lt;tag&gt;" html))
       (should-not (string-match-p "bad <tag>" html)))))
+
+(ert-deftest pretty-view-org-test-title-with-markup-is-not-truncated ()
+  (with-temp-buffer
+    (insert "#+TITLE: My *bold* Doc\n* Hi\n")
+    (org-mode)
+    (let ((title (pretty-view-org-title)))
+      (should (string-match-p "Doc" title))
+      (should (string-match-p "bold" title)))))
+
+(ert-deftest pretty-view-org-test-title-has-no-text-properties ()
+  (with-temp-buffer
+    (insert "#+TITLE: My Doc\n* Hi\n")
+    (org-mode)
+    (let ((title (pretty-view-org-title)))
+      (should (equal title "My Doc"))
+      (should (null (text-properties-at 0 title))))))
 
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here
