@@ -102,5 +102,26 @@
         (pretty-view-render-fontified-code "x = 1" lang))
       (should-not asked))))
 
+(ert-deftest pretty-view-render-test-fontify-honours-font-lock-face ()
+  "A run boundary must be found on font-lock-face, not only on face."
+  (with-temp-buffer
+    (insert "keyword value")
+    (put-text-property (point-min) (+ (point-min) 7)
+                       'font-lock-face 'font-lock-keyword-face)
+    (let ((html (pretty-view-render--fontify-buffer-html)))
+      (should (string-match-p "<span class=\"pv-keyword\">keyword</span>" html))
+      (should-not (string-match-p "keyword value</span>" html)))))
+
+(ert-deftest pretty-view-render-test-fontify-mixed-face-properties ()
+  "Both properties present, on different spans, must both be honoured."
+  (with-temp-buffer
+    (insert "aaa bbb ccc")
+    (put-text-property 1 4 'face 'font-lock-keyword-face)
+    (put-text-property 9 12 'font-lock-face 'font-lock-string-face)
+    (let ((html (pretty-view-render--fontify-buffer-html)))
+      (should (string-match-p "<span class=\"pv-keyword\">aaa</span>" html))
+      (should (string-match-p "<span class=\"pv-string\">ccc</span>" html))
+      (should (string-match-p ">bbb<\\| bbb " html)))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here

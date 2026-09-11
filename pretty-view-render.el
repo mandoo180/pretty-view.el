@@ -49,8 +49,8 @@
     ("md" . markdown-mode)
     ("text" . fundamental-mode))
   "Map a fenced code block's info string to a major mode.
-A language with no entry falls back to `LANG-ts-mode', then
-`LANG-mode', then no highlighting."
+A language with no entry falls back to `LANG-ts-mode' (if its grammar is
+installed), then `LANG-mode', then no highlighting."
   :type '(alist :key-type string :value-type symbol)
   :group 'pretty-view)
 
@@ -120,7 +120,8 @@ FACE may be a symbol, a list of faces, or an anonymous face plist."
   "Return the current buffer as HTML, spanning font-lock faces."
   (let ((out nil) (pos (point-min)))
     (while (< pos (point-max))
-      (let* ((next (next-single-property-change pos 'face nil (point-max)))
+      (let* ((next (min (next-single-property-change pos 'face nil (point-max))
+                        (next-single-property-change pos 'font-lock-face nil (point-max))))
              (face (or (get-text-property pos 'face)
                        (get-text-property pos 'font-lock-face)))
              (class (pretty-view-render--face-class face))
