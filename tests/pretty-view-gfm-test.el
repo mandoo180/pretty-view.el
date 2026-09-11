@@ -225,5 +225,51 @@
     (should (= (length blocks) 2))
     (should (eq (pv-test-type (nth 1 blocks)) 'paragraph))))
 
+(ert-deftest pretty-view-gfm-test-table ()
+  (let* ((node (pv-test-block "| a | b |\n|---|---|\n| 1 | 2 |"))
+         (rows (plist-get node :children)))
+    (should (eq (pv-test-type node) 'table))
+    (should (= (length rows) 2))
+    (should (plist-get (nth 0 rows) :header))
+    (should-not (plist-get (nth 1 rows) :header))
+    (should (equal (plist-get (nth 0 (plist-get (nth 0 rows) :children)) :raw)
+                   "a"))))
+
+(ert-deftest pretty-view-gfm-test-table-alignment ()
+  (let ((node (pv-test-block "| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |")))
+    (should (equal (plist-get node :align) '(left center right)))))
+
+(ert-deftest pretty-view-gfm-test-table-default-alignment-is-nil ()
+  (let ((node (pv-test-block "| a |\n|---|\n| 1 |")))
+    (should (equal (plist-get node :align) '(nil)))))
+
+(ert-deftest pretty-view-gfm-test-table-without-outer-pipes ()
+  (let ((node (pv-test-block "a | b\n--- | ---\n1 | 2")))
+    (should (eq (pv-test-type node) 'table))
+    (should (= (length (plist-get (nth 0 (plist-get node :children)) :children))
+               2))))
+
+(ert-deftest pretty-view-gfm-test-table-needs-delimiter-row ()
+  "A pipe row with no delimiter row underneath is a paragraph."
+  (should (eq (pv-test-type (pv-test-block "| a | b |\n| 1 | 2 |")) 'paragraph)))
+
+(ert-deftest pretty-view-gfm-test-table-escaped-pipe-stays-in-cell ()
+  (let* ((node (pv-test-block "| a |\n|---|\n| x \\| y |"))
+         (cell (car (plist-get (nth 1 (plist-get node :children)) :children))))
+    (should (equal (plist-get cell :raw) "x | y"))))
+
+(ert-deftest pretty-view-gfm-test-table-ends-at-blank-line ()
+  (let ((blocks (pv-test-blocks "| a |\n|---|\n| 1 |\n\nafter")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 1 blocks)) 'paragraph))))
+
+(ert-deftest pretty-view-gfm-test-table-interrupts-paragraph ()
+  "A table directly after a paragraph line starts its own block."
+  (let ((blocks (pv-test-blocks "text\n| a | b |\n|---|---|\n| 1 | 2 |")))
+    (should (= (length blocks) 2))
+    (should (eq (pv-test-type (nth 0 blocks)) 'paragraph))
+    (should (equal (plist-get (nth 0 blocks) :raw) "text"))
+    (should (eq (pv-test-type (nth 1 blocks)) 'table))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here

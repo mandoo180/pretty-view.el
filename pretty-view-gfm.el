@@ -212,6 +212,73 @@ Return a cons of the node and the remaining lines."
           ;; Trailing blank lines go back to the caller.
           (nthcdr (- (length lines) (length rest) (length pending)) lines))))
 
+(defconst pretty-view-gfm--table-delimiter-re
+  "\\` \\{0,3\\}|?[ \t]*:?-+:?[ \t]*\\(|[ \t]*:?-+:?[ \t]*\\)*|?[ \t]*\\'"
+  "Match a GFM table delimiter row.")
+
+(defun pretty-view-gfm--split-row (line)
+  "Split LINE into raw cell strings on unescaped pipes."
+  (let ((cells nil) (cur "") (i 0) (n (length line)))
+    (while (< i n)
+      (let ((c (aref line i)))
+        (cond
+         ((and (eq c ?\\) (< (1+ i) n) (eq (aref line (1+ i)) ?|))
+          (setq cur (concat cur "|"))
+          (setq i (+ i 2)))
+         ((eq c ?|)
+          (push cur cells)
+          (setq cur "")
+          (setq i (1+ i)))
+         (t (setq cur (concat cur (string c)))
+            (setq i (1+ i))))))
+    (push cur cells)
+    (setq cells (mapcar #'string-trim (nreverse cells)))
+    ;; Drop the empty strings produced by leading and trailing pipes.
+    (when (and cells (string-empty-p (car cells)))
+      (setq cells (cdr cells)))
+    (when (and cells (string-empty-p (car (last cells))))
+      (setq cells (butlast cells)))
+    cells))
+
+(defun pretty-view-gfm--table-align (delimiter-line)
+  "Return the alignment list encoded in DELIMITER-LINE."
+  (mapcar (lambda (spec)
+            (let ((l (string-prefix-p ":" spec))
+                  (r (string-suffix-p ":" spec)))
+              (cond ((and l r) 'center) (l 'left) (r 'right) (t nil))))
+          (pretty-view-gfm--split-row delimiter-line)))
+
+(defun pretty-view-gfm--table-row (line align header)
+  "Build a table-row node from LINE using ALIGN.
+HEADER is non-nil for the header row."
+  (let ((cells (pretty-view-gfm--split-row line)) (i -1))
+    (list :type 'table-row :header header
+          :children (mapcar (lambda (raw)
+                              (setq i (1+ i))
+                              (list :type 'table-cell :header header
+                                    :align (nth i align) :raw raw))
+                            cells))))
+
+(defun pretty-view-gfm--table-start-p (lines)
+  "Return non-nil when LINES opens a GFM pipe table."
+  (and (cdr lines)
+       (string-match-p "|" (car lines))
+       (string-match-p pretty-view-gfm--table-delimiter-re (nth 1 lines))))
+
+(defun pretty-view-gfm--take-table (lines)
+  "Consume a table from LINES.
+Return a cons of the node and the remaining lines."
+  (let* ((align (pretty-view-gfm--table-align (nth 1 lines)))
+         (rows (list (pretty-view-gfm--table-row (car lines) align t)))
+         (rest (nthcdr 2 lines)))
+    (while (and rest
+                (not (pretty-view-gfm--blank-p (car rest)))
+                (string-match-p "|" (car rest)))
+      (push (pretty-view-gfm--table-row (car rest) align nil) rows)
+      (setq rest (cdr rest)))
+    (cons (list :type 'table :align align :children (nreverse rows))
+          rest)))
+
 (defun pretty-view-gfm--block-start-p (line)
   "Return non-nil when LINE begins a new block.
 A line starts a block if it matches thematic break, ATX heading,
@@ -230,7 +297,8 @@ Stops before a blank line or a construct that interrupts a paragraph."
       (let ((line (nth n lines)))
         (if (and (> n 0)
                  (or (pretty-view-gfm--blank-p line)
-                     (pretty-view-gfm--block-start-p line)))
+                     (pretty-view-gfm--block-start-p line)
+                     (pretty-view-gfm--table-start-p (nthcdr n lines))))
             (setq stop t)
           (if (pretty-view-gfm--blank-p line)
               (setq stop t)
@@ -292,6 +360,11 @@ Stops before a blank line or a construct that interrupts a paragraph."
          ;; which the paragraph clause has already consumed.
          ((string-prefix-p "    " line)
           (let ((result (pretty-view-gfm--take-indented lines)))
+            (push (car result) nodes)
+            (setq lines (cdr result))))
+         ;; GFM pipe table.
+         ((pretty-view-gfm--table-start-p lines)
+          (let ((result (pretty-view-gfm--take-table lines)))
             (push (car result) nodes)
             (setq lines (cdr result))))
          ;; Paragraph.
