@@ -5215,6 +5215,50 @@ and its own history; committing to it is the user's call.
 
 ---
 
+## Appendix: Corrections applied during execution
+
+The tasks below were written before the code existed, and execution found
+defects in them. Each was verified against the running parser before being
+accepted. Tasks 2-6's inline text has been corrected where the fix was
+local; the structural changes are recorded here, because they emerged from
+later tasks and do not belong to any single one.
+
+**`pretty-view-gfm--block-start-p` (emerged in Task 4's fix round).** The
+plan repeatedly says "add PATTERN to the interrupt test in
+`pretty-view-gfm--paragraph-end`", describing an inline `or`. That `or` was
+extracted into a shared single-line predicate once Task 4's review found
+that `pretty-view-gfm--take-blockquote` needed the same test and had
+drifted from it. Every later "add to the interrupt test" instruction means
+"add to `pretty-view-gfm--block-start-p`". The one exception is the table
+check from Task 5: table detection needs two lines and does not fit the
+predicate's signature, so it lives in `--paragraph-end` alongside the
+predicate call.
+
+**The setext clause needs a block-start guard (found in Task 6's review).**
+A setext underline promotes a *paragraph*. Without
+`(not (pretty-view-gfm--block-start-p line))` in its `and`, the clause —
+which runs before the list, table, footnote, link-def and html clauses —
+promotes any non-blank line, so `<div>` followed by `---` becomes a heading
+plus a stray paragraph, and `- a` followed by `---` becomes a heading.
+
+**The list's lazy-continuation arm needs the same guard.** It became
+reachable for these inputs only once the setext guard was added, and would
+otherwise swallow `---` as item text. Genuine lazy continuation — an
+unmarked plain-text line continuing an item's paragraph — must keep working.
+
+**`pretty-view-gfm--dedent` must handle tabs.** The plan's version strips
+only literal spaces, while the footnote and list continuation patterns both
+accept a tab as indentation, so tab-indented continuations kept their tab.
+A tab consumes up to four columns of the width budget.
+
+**Two list-taker defects, corrected inline in Task 4.** The sibling test
+compares against the list's own first marker indentation rather than a fixed
+bound, and the item content is read out of the match data before
+`pretty-view-gfm--item-node` runs. Both are explained at the point of use.
+
+**The setext clause must not carry a thematic-break guard, corrected inline
+in Task 2.** Three or more dashes match both patterns.
+
 ## Appendix: File map
 
 | File | Lines (estimate) | Responsibility |
