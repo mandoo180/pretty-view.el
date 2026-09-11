@@ -132,5 +132,13 @@
     (org-mode)
     (should (equal (pretty-view-org-title) "See site now"))))
 
+(ert-deftest pretty-view-org-test-title-keeps-underscores ()
+  "A title is not sub/superscript syntax; underscores are literal."
+  (dolist (raw '("snake_case_name" "a_b and c_d" "x^2 plus y^2"))
+    (with-temp-buffer
+      (insert (format "#+TITLE: %s\n* H\n" raw))
+      (org-mode)
+      (should (equal (pretty-view-org-title) raw)))))
+
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here

@@ -66,42 +66,44 @@ merged over the inherited `html' backend at export time."
 
 (defun pretty-view-org--plain-text (data)
   "Return the plain text content of DATA, an Org secondary string or object.
-Markup is dropped by walking the parse tree rather than by rewriting
-reconstructed Org syntax, which would also delete ordinary characters
-such as the operators in \"3 + 4 = 7\"."
+Post-blank spaces are preserved."
   (cond
    ((stringp data) data)
    ((and (consp data) (symbolp (car data)))
-    ;; An element or object: its contents start after the type and the
-    ;; property plist.
     (let ((contents (nthcdr 2 data)))
-      (if contents
-          (mapconcat #'pretty-view-org--plain-text contents "")
-        ;; Objects with no contents (timestamps, entities) still carry
-        ;; their source text.
-        (or (org-element-property :raw-value data) ""))))
+      (let ((text (if contents
+                      (mapconcat #'pretty-view-org--plain-text contents "")
+                    (or (org-element-property :raw-value data) ""))))
+        (concat text (make-string (or (org-element-property :post-blank data) 0) 32)))))
    ((listp data) (mapconcat #'pretty-view-org--plain-text data ""))
    (t "")))
 
 (defun pretty-view-org-title ()
   "Return the `#+TITLE:' of the current Org buffer, or nil.
-Org markup is stripped from the title, so the result is plain text
-suitable for an HTML <title> element. The returned string has no
-text properties."
-  (let ((title-list (plist-get (org-export-get-environment) :title)))
-    (when title-list
-      ;; title-list is a secondary string: either a single string,
-      ;; or a list of strings and Org objects (for markup).
-      ;; Extract plain text by walking the parse tree to avoid
-      ;; deleting ordinary characters (e.g., in "3 + 4 = 7").
-      (let ((text (pretty-view-org--plain-text title-list)))
-        (unless (string-empty-p (string-trim text))
-          (substring-no-properties (string-trim text)))))))
+Underscores and carets are literal text, not subscript/superscript syntax."
+  (let ((keywords (org-collect-keywords (list "title"))))
+    (when keywords
+      (let ((raw-title (cadr (assoc "TITLE" keywords))))
+        (when raw-title
+          ;; Temporarily replace _ and ^ with placeholders to prevent
+          ;; them from being interpreted as subscript/superscript
+          (let* ((undersc-plh "◯")
+                 (caret-plh "◆")
+                 (escaped (replace-regexp-in-string "_" undersc-plh
+                            (replace-regexp-in-string "\\^" caret-plh raw-title))))
+            (let ((title-list (org-element-parse-secondary-string
+                               escaped
+                               (org-element-restriction 'paragraph))))
+              (let ((text (pretty-view-org--plain-text title-list)))
+                ;; Restore original characters
+                (let ((text (substring-no-properties text)))
+                  (let ((restored (replace-regexp-in-string caret-plh "^"
+                                    (replace-regexp-in-string undersc-plh "_" text))))
+                    (unless (string-empty-p (string-trim restored))
+                      (substring-no-properties (string-trim restored)))))))))))))
 
 (defun pretty-view-org-body ()
-  "Return the current Org buffer exported to an HTML body.
-An export failure is rendered into the body rather than signalled, so a
-broken document still opens in the browser with the reason visible."
+  "Return the current Org buffer exported to an HTML body."
   (condition-case err
       (let ((org-html-head-include-default-style nil)
             (org-html-head-include-scripts nil)
