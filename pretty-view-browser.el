@@ -28,14 +28,12 @@
 
 ;;; Code:
 
-(require 'browse-url)
 (require 'seq)
 
-(defvar pretty-view-browser--uname
-  (if (eq system-type 'gnu/linux)
-      (or (car (split-string (shell-command-to-string "uname -r") "\n" t)) "")
-    "")
-  "Kernel release string, read once at load time.
+(declare-function browse-url "browse-url" (url &optional new-window))
+
+(defvar pretty-view-browser--uname nil
+  "Kernel release string, computed on first use and cached.
 A variable rather than a call so tests can rebind it.")
 
 (defvar pretty-view-browser--windows-temp-cache 'unset
@@ -44,6 +42,10 @@ A variable rather than a call so tests can reset it.")
 
 (defun pretty-view-browser-wsl-p ()
   "Return non-nil when running under the Windows Subsystem for Linux."
+  ;; Ensure uname is loaded (compute on first use)
+  (when (and (eq system-type 'gnu/linux) (null pretty-view-browser--uname))
+    (setq pretty-view-browser--uname
+          (or (car (split-string (shell-command-to-string "uname -r") "\n" t)) "")))
   (and (eq system-type 'gnu/linux)
        (or (string-match-p "[Mm]icrosoft" pretty-view-browser--uname)
            (and (getenv "WSL_DISTRO_NAME") t))

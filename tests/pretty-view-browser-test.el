@@ -154,5 +154,14 @@
               ((symbol-function 'shell-command-to-string) (lambda (&rest _) "")))
       (should (null (pretty-view-browser--windows-temp))))))
 
+(ert-deftest pretty-view-browser-test-open-falls-back-to-browse-url ()
+  "When no platform command applies, browse-url is used with a file URL."
+  (let ((called nil))
+    (cl-letf (((symbol-function 'pretty-view-browser-command) (lambda (_f) nil))
+              ((symbol-function 'browse-url) (lambda (url) (setq called url))))
+      (let ((pretty-view-browser 'default))
+        (should (pretty-view-browser-open "/tmp/a.html"))
+        (should (equal called "file:///tmp/a.html"))))))
+
 (provide 'pretty-view-browser-test)
 ;;; pretty-view-browser-test.el ends here
