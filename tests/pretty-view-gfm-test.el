@@ -487,5 +487,72 @@
   (let ((node (pv-test-inline "[a `b` c](x)")))
     (should (eq (pv-test-type (nth 1 (plist-get node :children))) 'code-span))))
 
+(ert-deftest pretty-view-gfm-test-emphasis-asterisk ()
+  (let ((node (pv-test-inline "*em*")))
+    (should (eq (pv-test-type node) 'emphasis))
+    (should (equal (pv-test-text node) "em"))))
+
+(ert-deftest pretty-view-gfm-test-emphasis-underscore ()
+  (should (eq (pv-test-type (pv-test-inline "_em_")) 'emphasis)))
+
+(ert-deftest pretty-view-gfm-test-strong ()
+  (let ((node (pv-test-inline "**strong**")))
+    (should (eq (pv-test-type node) 'strong))
+    (should (equal (pv-test-text node) "strong"))))
+
+(ert-deftest pretty-view-gfm-test-strong-underscore ()
+  (should (eq (pv-test-type (pv-test-inline "__strong__")) 'strong)))
+
+(ert-deftest pretty-view-gfm-test-strikethrough ()
+  (let ((node (pv-test-inline "~~gone~~")))
+    (should (eq (pv-test-type node) 'strikethrough))
+    (should (equal (pv-test-text node) "gone"))))
+
+(ert-deftest pretty-view-gfm-test-nested-emphasis-in-strong ()
+  (let* ((strong (pv-test-inline "**a *b* c**"))
+         (inner (nth 1 (plist-get strong :children))))
+    (should (eq (pv-test-type strong) 'strong))
+    (should (eq (pv-test-type inner) 'emphasis))))
+
+(ert-deftest pretty-view-gfm-test-intraword-underscore-is-literal ()
+  "GFM does not emphasize inside a word with underscores."
+  (should (equal (pv-test-text (pv-test-block "snake_case_name"))
+                 "snake_case_name")))
+
+(ert-deftest pretty-view-gfm-test-intraword-asterisk-emphasizes ()
+  (let ((node (pv-test-inline "a*b*c" 1)))
+    (should (eq (pv-test-type node) 'emphasis))))
+
+(ert-deftest pretty-view-gfm-test-unmatched-delimiter-is-literal ()
+  (should (equal (pv-test-text (pv-test-block "*unclosed")) "*unclosed"))
+  (should (equal (pv-test-text (pv-test-block "a ** b")) "a ** b")))
+
+(ert-deftest pretty-view-gfm-test-emphasis-not-across-blocks ()
+  (let ((blocks (pv-test-blocks "*a\n\nb*")))
+    (should (equal (pv-test-text (nth 0 blocks)) "*a"))))
+
+(ert-deftest pretty-view-gfm-test-escaped-delimiter-is-not-a-delimiter ()
+  (should (equal (pv-test-text (pv-test-block "\\*a\\*")) "*a*")))
+
+(ert-deftest pretty-view-gfm-test-delimiter-inside-code-span-is-literal ()
+  (let ((span (pv-test-inline "`*x*`")))
+    (should (eq (pv-test-type span) 'code-span))
+    (should (equal (plist-get span :code) "*x*"))))
+
+(ert-deftest pretty-view-gfm-test-triple-delimiter-preserves-leftovers ()
+  "***a*** should produce strong with a leading asterisk and a trailing one.
+When matching ***...*** as strong, one asterisk remains on each side
+and must be preserved as text, not silently dropped."
+  (let* ((node (pv-test-inline "***a***"))
+         (inner (plist-get node :children)))
+    (should (eq (pv-test-type node) 'strong))
+    ;; The strong node's children start with a text node containing the
+    ;; leftover asterisk from the opener, then the content 'a'.
+    (should (eq (pv-test-type (car inner)) 'text))
+    (should (equal (plist-get (car inner) :value) "*"))
+    ;; The inline level contains a trailing text node for the closer's leftover.
+    (should (equal (pv-test-text (pv-test-block "***a***"))
+                   "*a*"))))
+
 (provide 'pretty-view-gfm-test)
 ;;; pretty-view-gfm-test.el ends here

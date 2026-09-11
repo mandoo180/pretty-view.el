@@ -578,6 +578,121 @@ Then drop trailing ) only while ) count exceeds ( count."
       (setq trimmed (substring trimmed 0 -1)))
     trimmed))
 
+(defun pretty-view-gfm--flanking (string start end)
+  "Classify the delimiter run in STRING between START and END.
+Return a cons of left-flanking and right-flanking booleans."
+  (let* ((before (if (> start 0) (aref string (1- start)) ?\s))
+         (after (if (< end (length string)) (aref string end) ?\s))
+         (before-ws (memq before '(?\s ?\t ?\n)))
+         (after-ws (memq after '(?\s ?\t ?\n)))
+         (before-punct (and (not before-ws)
+                            (string-match-p "[[:punct:]]" (string before))))
+         (after-punct (and (not after-ws)
+                           (string-match-p "[[:punct:]]" (string after)))))
+    (cons
+     ;; Left-flanking: not followed by whitespace, and either not
+     ;; followed by punctuation or preceded by whitespace/punctuation.
+     (and (not after-ws)
+          (or (not after-punct) before-ws before-punct))
+     ;; Right-flanking: the mirror image.
+     (and (not before-ws)
+          (or (not before-punct) after-ws after-punct)))))
+
+(defun pretty-view-gfm--delimiter-at (string pos)
+  "Read a delimiter run at POS in STRING.
+Return a plist node of type `delimiter', or nil when POS holds none."
+  (let ((c (aref string pos)))
+    (when (memq c '(?* ?_ ?~))
+      (let ((end pos))
+        (while (and (< end (length string)) (eq (aref string end) c))
+          (setq end (1+ end)))
+        (let* ((count (- end pos))
+               (flank (pretty-view-gfm--flanking string pos end))
+               ;; Underscores do not open or close inside a word.
+               (intraword (and (eq c ?_)
+                               (car flank) (cdr flank))))
+          (list :type 'delimiter :char c :count count
+                :can-open (and (car flank) (not intraword))
+                :can-close (and (cdr flank) (not intraword))
+                :value (make-string count c)
+                :end end))))))
+
+(defun pretty-view-gfm--consume-delimiter (nodes index count)
+  "Remove COUNT characters from the delimiter at INDEX in NODES.
+Clears the slot when nothing is left."
+  (let* ((node (aref nodes index))
+         (left (- (plist-get node :count) count)))
+    (if (<= left 0)
+        (aset nodes index nil)
+      (aset nodes index
+            (plist-put (plist-put (copy-sequence node) :count left)
+                       :value (make-string left (plist-get node :char)))))))
+
+(defun pretty-view-gfm--match-delimiters (nodes)
+  "Pair delimiter nodes in NODES into emphasis, strong, and strikethrough.
+Unmatched delimiter nodes degrade to text."
+  (let ((nodes (vconcat nodes)))
+    (let ((closer 0))
+      (while (< closer (length nodes))
+        (let ((node (aref nodes closer)))
+          (when (and node
+                     (eq (plist-get node :type) 'delimiter)
+                     (plist-get node :can-close))
+            (let ((opener (1- closer)) (found nil))
+              (while (and (>= opener 0) (not found))
+                (let ((cand (aref nodes opener)))
+                  (when (and cand
+                             (eq (plist-get cand :type) 'delimiter)
+                             (plist-get cand :can-open)
+                             (eq (plist-get cand :char) (plist-get node :char)))
+                    (setq found opener)))
+                (setq opener (1- opener)))
+              (when found
+                (let* ((char (plist-get node :char))
+                       (avail (min (plist-get node :count)
+                                   (plist-get (aref nodes found) :count)))
+                       (use (cond ((eq char ?~) (if (>= avail 2) 2 0))
+                                  ((>= avail 2) 2)
+                                  (t 1))))
+                  (when (> use 0)
+                    (let ((type (cond ((eq char ?~) 'strikethrough)
+                                      ((= use 2) 'strong)
+                                      (t 'emphasis)))
+                          (inner nil)
+                          (leftover-before nil))
+                      (let ((k (1+ found)))
+                        (while (< k closer)
+                          (when (aref nodes k) (push (aref nodes k) inner))
+                          (aset nodes k nil)
+                          (setq k (1+ k))))
+                      ;; Save the opener's leftover before consuming.
+                      (let* ((opener-node (aref nodes found))
+                             (opener-left (- (plist-get opener-node :count) use)))
+                        (when (> opener-left 0)
+                          (setq leftover-before
+                                (pretty-view-gfm--text
+                                 (make-string opener-left (plist-get opener-node :char))))))
+                      (pretty-view-gfm--consume-delimiter nodes found use)
+                      (pretty-view-gfm--consume-delimiter nodes closer use)
+                      ;; Build inner with opener's leftover if present.
+                      (let ((inner-final (nreverse inner)))
+                        (when leftover-before
+                          (setq inner-final (cons leftover-before inner-final)))
+                        (aset nodes found
+                              (list :type type :children inner-final)))
+                      ;; Re-examine this position: a partly consumed
+                      ;; closer may still close another opener.
+                      (setq closer (1- closer)))))))))
+        (setq closer (1+ closer))))
+    ;; Whatever delimiters remain become literal text.
+    (seq-filter
+     #'identity
+     (mapcar (lambda (node)
+               (if (and node (eq (plist-get node :type) 'delimiter))
+                   (pretty-view-gfm--text (plist-get node :value))
+                 node))
+             (append nodes nil)))))
+
 (defun pretty-view-gfm--parse-inlines (string)
   "Parse STRING into a list of inline nodes."
   (let ((nodes nil) (buf "") (i 0) (n (length string)))
@@ -665,6 +780,13 @@ Then drop trailing ) only while ) count exceeds ( count."
                           :children (list (list :type 'text :value url)))
                     nodes)
               (setq i (+ i (length url)))))
+           ;; Emphasis, strong, strikethrough delimiter run.
+           ((and (memq c '(?* ?_ ?~))
+                 (pretty-view-gfm--delimiter-at string i))
+            (let ((node (pretty-view-gfm--delimiter-at string i)))
+              (flush)
+              (push node nodes)
+              (setq i (plist-get node :end))))
            ;; Hard break: two or more trailing spaces before a newline.
            ((and (eq c ?\s)
                  (string-match "\\` \\{2,\\}\n" (substring string i)))
@@ -679,7 +801,7 @@ Then drop trailing ) only while ) count exceeds ( count."
            (t (setq buf (concat buf (string c)))
               (setq i (1+ i))))))
       (flush))
-    (nreverse nodes)))
+    (pretty-view-gfm--match-delimiters (nreverse nodes))))
 
 (defun pretty-view-gfm--resolve-inlines (nodes)
   "Return NODES with every `:raw' string replaced by parsed `:children'."
