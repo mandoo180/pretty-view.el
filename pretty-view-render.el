@@ -378,6 +378,10 @@ for that node type and logs a warning."
   :type '(alist :key-type symbol :value-type function)
   :group 'pretty-view)
 
+(defun pretty-view-render--is-valid-return (result)
+  "Return t if RESULT is a valid renderer return value (string or nil)."
+  (or (null result) (stringp result)))
+
 (defun pretty-view-render-nodes (nodes)
   "Return the concatenated HTML of NODES."
   (mapconcat #'pretty-view-render-node nodes ""))
@@ -393,7 +397,24 @@ for that node type and logs a warning."
       (pretty-view-render-nodes (plist-get node :children)))
      (t
       (condition-case err
-          (funcall fn node #'pretty-view-render-nodes)
+          (let ((result (funcall fn node #'pretty-view-render-nodes)))
+            (if (pretty-view-render--is-valid-return result)
+                (or result "")
+              ;; Validation failed, warn and try built-in
+              (display-warning
+               'pretty-view
+               (format "renderer for `%s' returned a non-string: %s; using the built-in"
+                       type (prin1-to-string result))
+               :warning)
+              (let ((builtin (cdr (assq type pretty-view-render--default-renderers))))
+                (if builtin
+                    (condition-case nil
+                        (let ((builtin-result (funcall builtin node #'pretty-view-render-nodes)))
+                          (if (pretty-view-render--is-valid-return builtin-result)
+                              (or builtin-result "")
+                            (pretty-view-render-nodes (plist-get node :children))))
+                      (error (pretty-view-render-nodes (plist-get node :children))))
+                  (pretty-view-render-nodes (plist-get node :children))))))
         (error
          (display-warning
           'pretty-view
@@ -403,7 +424,10 @@ for that node type and logs a warning."
          (let ((builtin (cdr (assq type pretty-view-render--default-renderers))))
            (if builtin
                (condition-case nil
-                   (funcall builtin node #'pretty-view-render-nodes)
+                   (let ((builtin-result (funcall builtin node #'pretty-view-render-nodes)))
+                     (if (pretty-view-render--is-valid-return builtin-result)
+                         (or builtin-result "")
+                       (pretty-view-render-nodes (plist-get node :children))))
                  (error (pretty-view-render-nodes (plist-get node :children))))
              (pretty-view-render-nodes (plist-get node :children))))))))))
 

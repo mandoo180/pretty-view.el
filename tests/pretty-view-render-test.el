@@ -276,5 +276,34 @@
         (should (string-match-p "<h1[^>]*>A</h1>" html))
         (should (string-match-p "<h1[^>]*>B</h1>" html))))))
 
+(ert-deftest pretty-view-render-test-non-string-return-falls-back ()
+  "A renderer returning a non-string is treated like one that signalled."
+  (let ((pretty-view-renderers
+         (cons '(thematic-break . (lambda (_n _r) 42)) pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest _) nil)))
+      (should (equal (pretty-view-render-node '(:type thematic-break))
+                     "<hr />\n")))))
+
+(ert-deftest pretty-view-render-test-nil-return-is-empty-not-a-failure ()
+  "nil is treated as empty string, not as a failure."
+  (let ((warned nil)
+        (pretty-view-renderers
+         (cons '(thematic-break . (lambda (_n _r) nil)) pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (setq warned t))))
+      (should (equal (pretty-view-render-node '(:type thematic-break)) ""))
+      (should-not warned))))
+
+(ert-deftest pretty-view-render-test-document-survives-non-string-return ()
+  "A whole document must survive one renderer returning garbage."
+  (let ((pretty-view-renderers
+         (cons '(thematic-break . (lambda (_n _r) (list "a" "b")))
+               pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest _) nil)))
+      (let ((html (pretty-view-render-document
+                   (pretty-view-gfm-parse "# A\n\n---\n\n# B"))))
+        (should (string-match-p "<h1[^>]*>A</h1>" html))
+        (should (string-match-p "<h1[^>]*>B</h1>" html))))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here
