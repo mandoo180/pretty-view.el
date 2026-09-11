@@ -35,9 +35,6 @@
     (should (pretty-view-browser-wsl-p)))
   (cl-letf (((symbol-function 'getenv) (lambda (&rest _) nil)))
     (let ((pretty-view-browser--uname "6.6.0-generic"))
-      (should-not (pretty-view-browser-wsl-p))))
-  (cl-letf (((symbol-function 'getenv) (lambda (&rest _) nil)))
-    (let ((pretty-view-browser--uname "6.6.0-generic"))
       (should-not (pretty-view-browser-wsl-p)))))
 
 (ert-deftest pretty-view-browser-test-wsl-detection-from-env ()
@@ -130,7 +127,7 @@
 (ert-deftest pretty-view-browser-test-windows-temp-is-cached ()
   "The Windows TEMP lookup runs a subprocess at most once."
   (let ((calls 0)
-        (pretty-view-browser--windows-temp-cache nil))
+        (pretty-view-browser--windows-temp-cache 'unset))
     (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () t))
               ((symbol-function 'shell-command-to-string)
                (lambda (&rest _) (setq calls (1+ calls)) "C:\\Temp\r\n")))
@@ -140,7 +137,7 @@
 
 (ert-deftest pretty-view-browser-test-windows-temp-nil-off-wsl ()
   "Off WSL the lookup runs nothing and returns nil."
-  (let ((pretty-view-browser--windows-temp-cache nil)
+  (let ((pretty-view-browser--windows-temp-cache 'unset)
         (ran nil))
     (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () nil))
               ((symbol-function 'shell-command-to-string)
@@ -149,7 +146,7 @@
       (should-not ran))))
 
 (ert-deftest pretty-view-browser-test-windows-temp-rejects-garbage ()
-  (let ((pretty-view-browser--windows-temp-cache nil))
+  (let ((pretty-view-browser--windows-temp-cache 'unset))
     (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () t))
               ((symbol-function 'shell-command-to-string) (lambda (&rest _) "")))
       (should (null (pretty-view-browser--windows-temp))))))
@@ -162,6 +159,35 @@
       (let ((pretty-view-browser 'default))
         (should (pretty-view-browser-open "/tmp/a.html"))
         (should (equal called "file:///tmp/a.html"))))))
+
+(ert-deftest pretty-view-browser-test-open-survives-a-signalling-function ()
+  "A user browser function that signals must not escape."
+  (let ((pretty-view-browser (lambda (_f) (error "boom")))
+        (reported nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq reported (apply #'format fmt args)))))
+      (should (null (pretty-view-browser-open "/tmp/a.html")))
+      (should (string-match-p "/tmp/a.html" reported)))))
+
+(ert-deftest pretty-view-browser-test-windows-temp-caches-a-nil-result ()
+  "A failed lookup must not re-run the subprocess on every call."
+  (let ((calls 0))
+    (pretty-view-browser--reset-caches)
+    (cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () t))
+              ((symbol-function 'shell-command-to-string)
+               (lambda (&rest _) (setq calls (1+ calls)) "")))
+      (should (null (pretty-view-browser--windows-temp)))
+      (should (null (pretty-view-browser--windows-temp)))
+      (should (= calls 1)))))
+
+(ert-deftest pretty-view-browser-test-output-name-is-never-empty-or-hidden ()
+  (let ((pretty-view-output-directory "/tmp/pv/"))
+    (dolist (src '("/x/--.md" "/x/...md" "/x/.md" "/x/___.md"))
+      (let ((name (file-name-nondirectory
+                   (pretty-view-browser-output-file src))))
+        (should-not (string-prefix-p "." name))
+        (should-not (string-prefix-p "-" name))
+        (should (string-match-p "\\`[[:alnum:]]" name))))))
 
 (provide 'pretty-view-browser-test)
 ;;; pretty-view-browser-test.el ends here
