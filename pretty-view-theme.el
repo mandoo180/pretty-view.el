@@ -69,7 +69,11 @@ this plist is the complete set of legal slots.")
 (defun pretty-view-define-theme (name &rest palette)
   "Register theme NAME with PALETTE, a plist of slot keywords and values.
 Slots omitted from PALETTE inherit `pretty-view-theme-default-palette'.
-Signals when PALETTE names a slot that does not exist."
+Signals when PALETTE names a slot that does not exist or is malformed.
+Values are inserted into CSS verbatim, so they must be valid CSS and
+must not contain `;' or `}'."
+  (when (oddp (length palette))
+    (error "pretty-view: malformed palette plist in theme `%s'" name))
   (let ((legal (pretty-view-theme--slots))
         (keys (seq-filter #'keywordp palette)))
     (dolist (key keys)
@@ -151,8 +155,9 @@ default palette so the page is always styled."
         (concat
          (pretty-view-theme--variables light ":root")
          (when dark
-           (format "@media (prefers-color-scheme: dark) {\n%s}\n"
-                   (pretty-view-theme--variables dark ":root")))
+           (format "@media (prefers-color-scheme: dark) {\n%s%s}\n"
+                   (pretty-view-theme--variables dark ":root")
+                   (or (plist-get dark :extra-css) "")))
          pretty-view-theme--base-stylesheet
          (or (plist-get light :extra-css) "")))
     (let ((palette (or (pretty-view-theme-palette name)

@@ -94,5 +94,28 @@
      (should (string-match-p "var(--pv-bg)" css))
      (should (string-match-p "--pv-bg" css)))))
 
+(ert-deftest pretty-view-theme-test-auto-keeps-dark-extra-css ()
+  "A dark variant's :extra-css must survive, inside the dark media block."
+  (pv-with-clean-themes
+   (pretty-view-define-theme 'dark-demo :bg "#111111"
+                             :extra-css ".dark-marker{}")
+   (pretty-view-define-theme 'light-demo :bg "#eeeeee"
+                             :dark-variant 'dark-demo
+                             :extra-css ".light-marker{}")
+   (let* ((pretty-view-default-light-theme 'light-demo)
+          (css (pretty-view-theme-css 'auto)))
+     (should (string-match-p "\\.dark-marker{}" css))
+     (should (string-match-p "\\.light-marker{}" css))
+     ;; The dark rule must sit inside the media block, the light one outside.
+     (let ((media (string-match "prefers-color-scheme" css))
+           (dark (string-match "\\.dark-marker{}" css))
+           (light (string-match "\\.light-marker{}" css)))
+       (should (< media dark))
+       (should (< dark light))))))
+
+(ert-deftest pretty-view-theme-test-odd-length-palette-signals ()
+  (pv-with-clean-themes
+   (should-error (pretty-view-define-theme 'demo :bg "#111" :fg))))
+
 (provide 'pretty-view-theme-test)
 ;;; pretty-view-theme-test.el ends here
