@@ -441,9 +441,7 @@ Stops before a blank line or a construct that interrupts a paragraph."
          ;; Setext heading: a paragraph followed by = or - underline.
          ((and (cdr lines)
                (string-match pretty-view-gfm--setext-re (nth 1 lines))
-               (not (pretty-view-gfm--blank-p line))
-               (not (string-match-p pretty-view-gfm--thematic-break-re
-                                    (nth 1 lines))))
+               (not (pretty-view-gfm--blank-p line)))
           (push (pretty-view-gfm--heading
                  (if (string-prefix-p "=" (string-trim (nth 1 lines))) 1 2)
                  (string-trim line))
@@ -473,6 +471,14 @@ Note the setext clause sits *after* the thematic-break clause but tests a
 *following* line, so `text\n---` becomes a level-2 heading while a bare
 `---` becomes a break. That ordering is what
 `pretty-view-gfm-test-thematic-break-interrupts-paragraph` pins.
+
+Do **not** add a `(not (string-match-p pretty-view-gfm--thematic-break-re
+(nth 1 lines)))` guard to this clause. A run of three or more dashes matches
+both patterns, so such a guard would make every dash-underlined setext
+heading impossible and break
+`pretty-view-gfm-test-setext-heading`. Clause order already does the
+separating work: a bare `---` reaches the thematic-break clause as the
+*current* line and never gets to this one.
 
 `pretty-view-gfm--parse-blocks` must `require 'seq` transitively; add
 `(require 'seq)` next to `(require 'subr-x)`.
