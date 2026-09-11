@@ -65,7 +65,7 @@
   :code-bg "#f3e8d2" :code-fg "#433422" :code-border "#ddcdae"
   :quote-border "#c9b189" :quote-fg "#6d5a3e"
   :table-stripe "#f3e8d2" :mark-bg "#f5e0a3"
-  :keyword "#9a2f2f" :string "#4b6b2f" :comment "#8a7a5c"
+  :keyword "#9a2f2f" :string "#4b6b2f" :comment "#736546"
   :doc "#4b6b2f" :function "#7a4b9a" :variable "#433422"
   :type "#96591a" :constant "#2f5d7c" :builtin "#2f5d7c"
   :preprocessor "#7a4b9a" :operator "#5c4a2e"
@@ -74,16 +74,20 @@
   :measure "40rem" :line-height "1.75"
   :dark-variant 'nord)
 
+;; Nord theme uses modified colors for contrast:
+;; - :keyword, :muted, :comment differ from upstream nord3/nord4 to meet WCAG AA
+;;   on code backgrounds. Upstream intends nord3 (#616e88) against nord0 (darkest),
+;;   not nord1 (#3b4252 code-bg). Legibility trumps palette fidelity.
 (pretty-view-define-theme 'nord
-  :bg "#2e3440" :fg "#d8dee9" :muted "#7b88a1"
+  :bg "#2e3440" :fg "#d8dee9" :muted "#909cb5"
   :accent "#88c0d0" :accent-muted "#3b4252"
   :border "#434c5e" :rule "#434c5e"
   :code-bg "#3b4252" :code-fg "#e5e9f0" :code-border "#4c566a"
   :quote-border "#4c566a" :quote-fg "#a9b3c6"
   :table-stripe "#353c4a" :mark-bg "#4c4322"
-  :keyword "#81a1c1" :string "#a3be8c" :comment "#616e88"
+  :keyword "#8fb3d6" :string "#a3be8c" :comment "#a3aec4"
   :doc "#a3be8c" :function "#88c0d0" :variable "#d8dee9"
-  :type "#8fbcbb" :constant "#b48ead" :builtin "#81a1c1"
+  :type "#8fbcbb" :constant "#c9a3d9" :builtin "#8fb3d6"
   :preprocessor "#b48ead" :operator "#81a1c1"
   :escape "#ebcb8b" :warning "#ebcb8b"
   :dark-variant 'nord)
@@ -95,7 +99,7 @@
   :code-bg "#14121f" :code-fg "#e8e6f0" :code-border "#332e4d"
   :quote-border "#ff2e88" :quote-fg "#b7b1cf"
   :table-stripe "#14121f" :mark-bg "#3d2f10"
-  :keyword "#ff2e88" :string "#9cf06b" :comment "#6b6590"
+  :keyword "#ff2e88" :string "#9cf06b" :comment "#8b85b5"
   :doc "#9cf06b" :function "#4de2ff" :variable "#e8e6f0"
   :type "#ffd866" :constant "#c792ea" :builtin "#4de2ff"
   :preprocessor "#c792ea" :operator "#ff9f4a"

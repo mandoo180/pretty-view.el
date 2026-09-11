@@ -153,5 +153,41 @@
                      "pv-toc"))
       (should (string-match-p (regexp-quote class) css)))))
 
+(defun pv-test-relative-luminance (hex)
+  "Return the WCAG relative luminance of HEX, a \"#rrggbb\" string."
+  (let* ((s (substring hex 1))
+         (channels (mapcar (lambda (i)
+                             (/ (string-to-number
+                                 (substring s (* i 2) (+ (* i 2) 2)) 16)
+                                255.0))
+                           '(0 1 2)))
+         (linear (mapcar (lambda (c)
+                           (if (<= c 0.04045)
+                               (/ c 12.92)
+                             (expt (/ (+ c 0.055) 1.055) 2.4)))
+                         channels)))
+    (+ (* 0.2126 (nth 0 linear))
+       (* 0.7152 (nth 1 linear))
+       (* 0.0722 (nth 2 linear)))))
+
+(defun pv-test-contrast (a b)
+  "Return the WCAG contrast ratio between colours A and B."
+  (let ((la (pv-test-relative-luminance a))
+        (lb (pv-test-relative-luminance b)))
+    (/ (+ (max la lb) 0.05) (+ (min la lb) 0.05))))
+
+(ert-deftest pretty-view-themes-test-contrast-meets-aa ()
+  "Every bundled theme must keep body and code text readable.
+4.5 is the WCAG AA threshold for body text."
+  (dolist (name '(github-light github-dark sepia nord cyberpunk))
+    (let* ((p (pretty-view-theme-palette name))
+           (bg (plist-get p :bg))
+           (code-bg (plist-get p :code-bg)))
+      (dolist (slot '(:fg :muted :accent))
+        (should (>= (pv-test-contrast (plist-get p slot) bg) 4.5)))
+      (dolist (slot '(:keyword :string :comment :function
+                      :variable :type :constant :builtin))
+        (should (>= (pv-test-contrast (plist-get p slot) code-bg) 4.5))))))
+
 (provide 'pretty-view-theme-test)
 ;;; pretty-view-theme-test.el ends here
