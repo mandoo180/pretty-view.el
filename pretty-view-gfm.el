@@ -45,14 +45,30 @@
   "Return non-nil when LINE contains only whitespace."
   (string-match-p "\\`[ \t]*\\'" line))
 
+(defvar pretty-view-gfm--slug-counts nil
+  "Hash table counting slugs already assigned in the document being parsed.
+Maps a base slug (as computed by `pretty-view-gfm--slug' before
+de-duplication) to how many times it has been used.  Let-bound by
+`pretty-view-gfm-parse' for the duration of one parse; nil outside of
+an active parse, in which case `pretty-view-gfm--slug' returns the bare
+slug with no de-duplication.")
+
 (defun pretty-view-gfm--slug (string)
   "Return an anchor id derived from STRING.
-Lowercases, drops punctuation, and joins words with hyphens."
+Lowercases, drops punctuation, and joins words with hyphens.  Within an
+active `pretty-view-gfm-parse', a STRING that repeats an earlier
+heading's text gets `-2', `-3', and so on appended, so two headings in
+the same document never collide on the same id."
   (let* ((s (downcase (string-trim string)))
          (s (replace-regexp-in-string "[^[:alnum:][:nonascii:] _-]" "" s))
          (s (replace-regexp-in-string "[ _]+" "-" s))
-         (s (replace-regexp-in-string "-+" "-" s)))
-    (string-trim s "-" "-")))
+         (s (replace-regexp-in-string "-+" "-" s))
+         (base (string-trim s "-" "-")))
+    (if pretty-view-gfm--slug-counts
+        (let ((seen (gethash base pretty-view-gfm--slug-counts 0)))
+          (puthash base (1+ seen) pretty-view-gfm--slug-counts)
+          (if (zerop seen) base (format "%s-%d" base (1+ seen))))
+      base)))
 
 (defun pretty-view-gfm--strip-atx-closing (text)
   "Return TEXT without a trailing ATX closing sequence."
@@ -223,21 +239,26 @@ Return a cons of the node and the remaining lines."
 (defun pretty-view-gfm--take-indented (lines)
   "Consume an indented code block from LINES.
 Return a cons of the node and the remaining lines."
-  (let ((body nil) (rest lines) (pending nil))
+  ;; PENDING counts blank lines seen since the last code line, rather
+  ;; than accumulating a list of them: every pending entry is an empty
+  ;; string, so only the count matters, and flushing it below with
+  ;; `dotimes' sidesteps any question of whether merging it into BODY
+  ;; preserves the right order -- there is nothing to reorder.
+  (let ((body nil) (rest lines) (pending 0))
     (while (and rest
                 (or (string-prefix-p "    " (car rest))
                     (pretty-view-gfm--blank-p (car rest))))
       (if (pretty-view-gfm--blank-p (car rest))
           ;; Blank lines belong to the block only when code follows.
-          (push "" pending)
-        (setq body (append pending body))
-        (setq pending nil)
+          (setq pending (1+ pending))
+        (dotimes (_ pending) (push "" body))
+        (setq pending 0)
         (push (substring (car rest) 4) body))
       (setq rest (cdr rest)))
     (cons (list :type 'code-block :lang nil
                 :code (concat (string-join (nreverse body) "\n") "\n"))
           ;; Trailing blank lines go back to the caller.
-          (nthcdr (- (length lines) (length rest) (length pending)) lines))))
+          (nthcdr (- (length lines) (length rest) pending) lines))))
 
 (defconst pretty-view-gfm--table-delimiter-re
   "\\` \\{0,3\\}|?[ \t]*:?-+:?[ \t]*\\(|[ \t]*:?-+:?[ \t]*\\)*|?[ \t]*\\'"
@@ -829,7 +850,11 @@ Unmatched delimiter nodes degrade to text."
 (defun pretty-view-gfm-parse (string)
   "Parse STRING as GitHub Flavored Markdown and return a document node."
   (setq pretty-view-gfm--link-refs (make-hash-table :test #'equal))
-  (let* ((lines (split-string (string-trim-right string "\n") "\n"))
+  ;; Bound with `let*', not `setq' like `pretty-view-gfm--link-refs'
+  ;; above, so the per-document slug counter is guaranteed to reset for
+  ;; every parse and never leak into the next one.
+  (let* ((pretty-view-gfm--slug-counts (make-hash-table :test #'equal))
+         (lines (split-string (string-trim-right string "\n") "\n"))
          (blocks (if (equal lines '(""))
                      nil
                    (pretty-view-gfm--parse-blocks lines))))

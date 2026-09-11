@@ -117,6 +117,87 @@
             (should (string-match-p "location.reload" (buffer-string)))))
       (delete-file out))))
 
+(ert-deftest pretty-view-test-file-renders-and-does-not-open-a-real-browser ()
+  "pretty-view-file must render FILE to HTML without launching a browser."
+  (let* ((src (make-temp-file "pv-src" nil ".txt"))
+         (out-dir (make-temp-file "pv-out" t))
+         (opened nil))
+    (unwind-protect
+        (progn
+          (with-temp-file src (insert "hello from file"))
+          (let ((pretty-view-output-directory out-dir))
+            (cl-letf (((symbol-function 'pretty-view-browser-open)
+                       (lambda (f) (setq opened f))))
+              (pretty-view-file src)))
+          (should opened)
+          (should (file-exists-p opened))
+          (with-temp-buffer
+            (insert-file-contents opened)
+            (should (string-match-p "hello from file" (buffer-string)))))
+      (delete-file src)
+      (delete-directory out-dir t))))
+
+(ert-deftest pretty-view-test-file-does-not-leave-a-buffer-behind ()
+  "Rendering a file that was not already visited must not leave a buffer."
+  (let* ((src (make-temp-file "pv-src" nil ".txt"))
+         (out-dir (make-temp-file "pv-out" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file src (insert "hello"))
+          (should (null (get-file-buffer src)))
+          (let ((pretty-view-output-directory out-dir))
+            (cl-letf (((symbol-function 'pretty-view-browser-open) #'ignore))
+              (pretty-view-file src)))
+          (should (null (get-file-buffer src))))
+      (delete-file src)
+      (delete-directory out-dir t))))
+
+(ert-deftest pretty-view-test-file-keeps-a-buffer-that-was-already-open ()
+  "Rendering a file already visited in a buffer must not kill that buffer."
+  (let* ((src (make-temp-file "pv-src" nil ".txt"))
+         (out-dir (make-temp-file "pv-out" t))
+         (buf (find-file-noselect src)))
+    (unwind-protect
+        (progn
+          (let ((pretty-view-output-directory out-dir))
+            (cl-letf (((symbol-function 'pretty-view-browser-open) #'ignore))
+              (pretty-view-file src)))
+          (should (buffer-live-p (get-file-buffer src))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-file src)
+      (delete-directory out-dir t))))
+
+(ert-deftest pretty-view-test-export-writes-file-without-opening-a-browser ()
+  (let ((out (make-temp-file "pv-export" nil ".html"))
+        (opened nil))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'pretty-view-browser-open)
+                     (lambda (f) (setq opened f))))
+            (pv-in-mode text-mode "hello export"
+              (pretty-view-export out)))
+          (should (null opened))
+          (with-temp-buffer
+            (insert-file-contents out)
+            (should (string-match-p "hello export" (buffer-string)))))
+      (delete-file out))))
+
+(ert-deftest pretty-view-test-export-interactive-spec-suggests-html-name ()
+  "The interactive prompt must default to the buffer's base name with .html."
+  (let ((out (make-temp-file "pv-export" nil ".html"))
+        (suggested nil))
+    (unwind-protect
+        (progn
+          (pv-in-mode text-mode "x"
+            (rename-buffer "my-notes" t)
+            (cl-letf (((symbol-function 'read-file-name)
+                       (lambda (_prompt &optional _dir _default _mustmatch initial &rest _)
+                         (setq suggested initial)
+                         out)))
+              (call-interactively #'pretty-view-export)))
+          (should (equal suggested "my-notes.html")))
+      (delete-file out))))
+
 (ert-deftest pretty-view-test-title-from-org ()
   (pv-in-mode org-mode "#+TITLE: My Doc\n* Hi\n"
     (should (equal (pretty-view--title) "My Doc"))))
@@ -182,6 +263,29 @@
                            'none
                          pretty-view-toc))))
         (should-not (string-match-p "class=\"pv-toc\"" html))))))
+
+(defconst pretty-view-test--package-file
+  ;; `load-file-name' is only bound while this file is being loaded, so
+  ;; it must be captured here at top level, not read from inside a
+  ;; deftest body that runs later (see `pretty-view-corpus-directory'
+  ;; in pretty-view-corpus-test.el for the same pattern).
+  (expand-file-name "pretty-view.el"
+                    (file-name-directory
+                     (directory-file-name
+                      (file-name-directory
+                       (or load-file-name buffer-file-name)))))
+  "Path to the repository's top-level pretty-view.el, for metadata tests.")
+
+(ert-deftest pretty-view-test-package-metadata-is-installable ()
+  "package.el must accept this file's headers."
+  (require 'package)
+  (let ((desc (with-temp-buffer
+                (insert-file-contents pretty-view-test--package-file)
+                (emacs-lisp-mode)
+                (package-buffer-info))))
+    (should (eq (package-desc-name desc) 'pretty-view))
+    (should (assq 'emacs (package-desc-reqs desc)))
+    (should-not (assq 'Emacs (package-desc-reqs desc)))))
 
 (provide 'pretty-view-test)
 ;;; pretty-view-test.el ends here

@@ -96,7 +96,10 @@
      (should (string-match-p "--pv-bg" css)))))
 
 (ert-deftest pretty-view-theme-test-auto-keeps-dark-extra-css ()
-  "A dark variant's :extra-css must survive, inside the dark media block."
+  "A dark variant's :extra-css must survive, and must override the base
+stylesheet exactly as a light variant's :extra-css does -- both must be
+emitted after the base stylesheet, not merely inside a media query that
+itself precedes it."
   (pv-with-clean-themes
    (pretty-view-define-theme 'dark-demo :bg "#111111"
                              :extra-css ".dark-marker{}")
@@ -107,12 +110,20 @@
           (css (pretty-view-theme-css 'auto)))
      (should (string-match-p "\\.dark-marker{}" css))
      (should (string-match-p "\\.light-marker{}" css))
-     ;; The dark rule must sit inside the media block, the light one outside.
-     (let ((media (string-match "prefers-color-scheme" css))
-           (dark (string-match "\\.dark-marker{}" css))
-           (light (string-match "\\.light-marker{}" css)))
-       (should (< media dark))
-       (should (< dark light))))))
+     (let* ((base (string-match "var(--pv-bg)" css))
+            (dark (string-match "\\.dark-marker{}" css))
+            (light (string-match "\\.light-marker{}" css))
+            ;; A second, later media query -- the one wrapping the dark
+            ;; extra-css -- must open somewhere between the base
+            ;; stylesheet and the dark marker itself.
+            (dark-media (string-match "prefers-color-scheme" css base)))
+       ;; Both halves come after the base stylesheet, so both override
+       ;; base rules of equal specificity, regardless of theme.
+       (should (< base dark))
+       (should (< base light))
+       ;; The dark half is still gated by its own media query.
+       (should dark-media)
+       (should (< base dark-media dark))))))
 
 (ert-deftest pretty-view-theme-test-odd-length-palette-signals ()
   (pv-with-clean-themes

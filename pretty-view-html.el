@@ -29,6 +29,11 @@
 (require 'pretty-view-themes)
 (require 'pretty-view-render)
 
+;; Duplicated from pretty-view-render.el (`defgroup' merges harmlessly).
+;; This file's `require's above already pull the group in transitively,
+;; but the explicit definition is kept so the group still resolves here
+;; even if those requires are ever reordered or trimmed -- not an
+;; accidental copy-paste.
 (defgroup pretty-view nil
   "Render Org, Markdown, and text buffers to styled HTML."
   :group 'convenience
@@ -83,6 +88,24 @@ the replacement, applied in order.  A return value of nil leaves the body
 unchanged."
   :type 'hook
   :group 'pretty-view)
+
+(defun pretty-view-html--hook-functions (hook)
+  "Return the ordered functions to call for HOOK, a hook variable symbol.
+HOOK's `:type' is `hook', and the spec invites buffer-local use via
+\(add-hook HOOK fn nil t).  That form of `add-hook' puts the symbol t as
+a sentinel in the buffer-local value, meaning \"also run the global
+value here\"; naively `mapconcat'/`seq-reduce'-ing over the raw list
+would try to funcall that sentinel and error.  Mirror what `run-hooks'
+does instead: splice the default (global) value in at the sentinel's
+position, so both the buffer-local and global functions run, in order."
+  (let ((value (symbol-value hook)))
+    (cond
+     ((functionp value) (list value))
+     ((listp value)
+      (mapcan (lambda (fn)
+                (if (eq fn t) (copy-sequence (default-value hook)) (list fn)))
+              value))
+     (t nil))))
 
 ;; Table of contents implementation
 
@@ -139,13 +162,19 @@ one-entry contents list is noise."
                (file-regular-p file)
                (<= (file-attribute-size (file-attributes file))
                    pretty-view-inline-image-max-bytes))
-      (condition-case nil
-          (with-temp-buffer
-            (set-buffer-multibyte nil)
-            (insert-file-contents-literally file)
-            (format "data:%s;base64,%s"
-                    mime (base64-encode-string (buffer-string) t)))
-        (error nil)))))
+      ;; Only the file read is allowed to fail quietly and fall back to
+      ;; a plain link (e.g. a permission error, or the file vanishing
+      ;; between the checks above and this read).  A genuine bug in the
+      ;; base64 encoding itself must surface as an error, not be masked
+      ;; as an ordinary "can't embed this file" case.
+      (let ((contents (condition-case nil
+                          (with-temp-buffer
+                            (set-buffer-multibyte nil)
+                            (insert-file-contents-literally file)
+                            (buffer-string))
+                        (error nil))))
+        (when contents
+          (format "data:%s;base64,%s" mime (base64-encode-string contents t)))))))
 
 (defun pretty-view-html--inline-assets (html base-directory)
   "Return HTML with local image sources under BASE-DIRECTORY embedded.
@@ -200,7 +229,9 @@ LIVE non-nil embeds the reload script, and TOC overrides `pretty-view-toc'
 when provided (accepting `none to suppress the shell TOC).  When TOC is
 nil, it defaults to `pretty-view-toc'."
   (let* ((body (seq-reduce (lambda (acc fn) (or (funcall fn acc) acc))
-                           pretty-view-body-filter-functions body))
+                           (pretty-view-html--hook-functions
+                            'pretty-view-body-filter-functions)
+                           body))
          (body (pretty-view-html--inline-assets
                 body (or base-directory default-directory)))
          (depth (cond ((eq toc 'none) nil)
@@ -212,7 +243,9 @@ nil, it defaults to `pretty-view-toc'."
                       (t nil)))
          (toc-html (and depth (pretty-view-html--toc body depth)))
          (head (mapconcat (lambda (fn) (or (funcall fn) ""))
-                          pretty-view-head-functions "\n")))
+                          (pretty-view-html--hook-functions
+                           'pretty-view-head-functions)
+                          "\n")))
     (concat
      "<!DOCTYPE html>\n<html lang=\"" pretty-view-html-lang "\">\n<head>\n"
      "<meta charset=\"utf-8\" />\n"

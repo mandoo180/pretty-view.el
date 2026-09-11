@@ -260,7 +260,7 @@ In addition to the extension points above, the following variables control the p
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `pretty-view-allow-raw-html` | `t` | When non-nil, pass raw HTML blocks through unchanged; when nil, escape them. See Threat Model section |
+| `pretty-view-allow-raw-html` | `t` | Markdown only: when non-nil, pass raw HTML blocks through unchanged; when nil, escape them. Org's `#+BEGIN_EXPORT html` blocks are governed by Org's own export settings, not by this variable. See Threat Model section |
 | `pretty-view-text-as-markdown` | nil | When non-nil, route plain-text files through the Markdown parser instead of the plain-text converter |
 | `pretty-view-live-interval` | 1.5 | Seconds between browser reloads in `pretty-view-live-mode`; nil disables auto-reload |
 
@@ -319,7 +319,7 @@ To disable automatic reloads entirely, set `pretty-view-live-interval` to nil. T
 The package is designed for rendering documents you author or trust. Raw HTML and `javascript:` URLs in the source both reach the browser unchanged, so:
 
 - **Do not render untrusted HTML or Markdown.** An attacker-controlled document can inject arbitrary JavaScript.
-- **Do not set `pretty-view-allow-raw-html` to nil** to prevent this; the right approach is not to render documents you don't trust.
+- **Do not set `pretty-view-allow-raw-html` to nil** to prevent this; the right approach is not to render documents you don't trust. Note also that this variable only affects the Markdown path — it does not gate Org `#+BEGIN_EXPORT html` blocks, which pass through under Org's own export settings.
 
 If you must render external content, filter it through a sanitizer before rendering.
 
@@ -333,4 +333,4 @@ If you must render external content, filter it through a sanitizer before render
 
 ## License
 
-GPL-3.0-or-later. See the file `COPYING` in the repository.
+GPL-3.0-or-later. See the file `LICENSE` in the repository.

@@ -154,5 +154,16 @@
     (org-mode)
     (should (equal (pretty-view-org-title) "a_{bc} and d^{ef}"))))
 
+(ert-deftest pretty-view-org-test-broken-link-does-not-destroy-document ()
+  "One broken internal link must not abort the whole export."
+  (let ((html (pv-org (concat "* Before\nSome text before.\n\n"
+                              "See [[*No Such Heading]] here.\n\n"
+                              "* After\nSome text after.\n"))))
+    (should-not (string-match-p "pv-error" html))
+    (should (string-match-p "Before" html))
+    (should (string-match-p "Some text before" html))
+    (should (string-match-p "After" html))
+    (should (string-match-p "Some text after" html))))
+
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here

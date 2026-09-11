@@ -31,7 +31,11 @@
 ;; Maintainer: Kyeong Soo Choi <kyeongsoo@douzone.com>
 ;; URL: https://github.com/mandoo180/pretty-view.el
 ;; Version: 0.1.0
-;; Package-Requires: ((Emacs "29.1"))
+;; The dependency name below must stay lowercase -- `package.el' only
+;; recognizes the symbol `emacs', not `Emacs' -- so the leading
+;; backslash is deliberate: it keeps checkdoc's prose rule that "emacs"
+;; should read "Emacs" from misfiring on this machine-read header.
+;; Package-Requires: ((\emacs "29.1"))
 ;; Keywords: outlines, hypermedia, markdown, org
 
 ;;; Code:

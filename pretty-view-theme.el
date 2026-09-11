@@ -29,6 +29,9 @@
 (require 'seq)
 (require 'subr-x)                       ; hash-table-keys is not preloaded
 
+;; Duplicated from pretty-view-render.el (`defgroup' merges harmlessly)
+;; so this file's own defcustoms resolve when loaded standalone, e.g.
+;; for just the palette machinery -- not an accidental copy-paste.
 (defgroup pretty-view nil
   "Render Org, Markdown, and text buffers to styled HTML."
   :group 'convenience
@@ -315,10 +318,18 @@ default palette so the page is always styled."
         (concat
          (pretty-view-theme--variables light ":root")
          (when dark
-           (format "@media (prefers-color-scheme: dark) {\n%s%s}\n"
-                   (pretty-view-theme--variables dark ":root")
-                   (or (plist-get dark :extra-css) "")))
+           (format "@media (prefers-color-scheme: dark) {\n%s}\n"
+                   (pretty-view-theme--variables dark ":root")))
          pretty-view-theme--base-stylesheet
+         ;; The dark half's :extra-css must come after the base
+         ;; stylesheet too, exactly like the light half below -- inside
+         ;; a media query is not "after" in the cascade, so emitting it
+         ;; only inside the block above (which precedes the base
+         ;; stylesheet) let base rules of equal specificity win under a
+         ;; dark theme but not under a light one.
+         (when (and dark (plist-get dark :extra-css))
+           (format "@media (prefers-color-scheme: dark) {\n%s}\n"
+                   (plist-get dark :extra-css)))
          (or (plist-get light :extra-css) "")))
     (let ((palette (or (pretty-view-theme-palette name)
                        pretty-view-theme-default-palette)))

@@ -114,7 +114,11 @@ Subscripts, superscripts, and other markup are reconstructed as Org syntax."
       (let ((org-html-head-include-default-style nil)
             (org-html-head-include-scripts nil)
             (org-html-htmlize-output-type nil)
-            (org-export-with-smart-quotes t))
+            (org-export-with-smart-quotes t)
+            ;; A single broken link must not abort the whole export (and
+            ;; thus replace the entire document with a `.pv-error' box in
+            ;; live mode); mark it in place and keep exporting instead.
+            (org-export-with-broken-links 'mark))
         (org-export-as (pretty-view-org--backend) nil nil t nil))
     (error
      (format "<div class=\"pv-error\"><strong>Org export failed:</strong> %s</div>\n"

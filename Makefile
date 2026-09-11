@@ -26,7 +26,7 @@ compile-isolated: clean
 
 checkdoc:
 	$(EMACS) -Q --batch $(LOAD) \
-	  --eval '(dolist (f (file-expand-wildcards "pretty-view*.el")) (checkdoc-file f))'
+	  --eval '(progn (require (quote checkdoc)) (let ((checkdoc--batch-flag t)) (dolist (f (file-expand-wildcards "pretty-view*.el")) (checkdoc-file f))) (kill-emacs (if checkdoc-pending-errors 1 0)))'
 
 clean:
 	rm -f *.elc tests/*.elc

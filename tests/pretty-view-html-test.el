@@ -21,6 +21,7 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'pretty-view-html)
 (require 'pretty-view-themes)
 
@@ -106,6 +107,31 @@
             (should-not (string-match-p "src=\"x.png\"" html))))
       (delete-directory dir t))))
 
+(ert-deftest pretty-view-html-test-data-uri-read-failure-returns-nil ()
+  "A file that vanishes or cannot be read falls back to nil quietly."
+  (let* ((dir (make-temp-file "pv-assets" t))
+         (png (expand-file-name "x.png" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file png (set-buffer-multibyte nil) (insert "\211PNG\r\n"))
+          (cl-letf (((symbol-function 'insert-file-contents-literally)
+                     (lambda (&rest _) (error "synthetic read failure"))))
+            (should-not (pretty-view-html--data-uri png))))
+      (delete-directory dir t))))
+
+(ert-deftest pretty-view-html-test-data-uri-encoding-bug-is-not-masked ()
+  "A genuine bug in the base64 step must signal, not be treated as a
+missing/unreadable file."
+  (let* ((dir (make-temp-file "pv-assets" t))
+         (png (expand-file-name "x.png" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file png (set-buffer-multibyte nil) (insert "\211PNG\r\n"))
+          (cl-letf (((symbol-function 'base64-encode-string)
+                     (lambda (&rest _) (error "synthetic encoding bug"))))
+            (should-error (pretty-view-html--data-uri png))))
+      (delete-directory dir t))))
+
 (ert-deftest pretty-view-html-test-inline-skips-remote-urls ()
   (let ((html (pretty-view-html--inline-assets
                "<img src=\"https://e.com/x.png\" />" "/tmp")))
@@ -182,6 +208,32 @@
   (let ((pretty-view-live-interval nil))
     (should-not (string-match-p "location.reload"
                                 (pretty-view-html-document "x" :live t)))))
+
+(ert-deftest pretty-view-html-test-head-functions-buffer-local-and-global-both-run ()
+  "A buffer-local head function must not error on the `t' sentinel, and
+the global head function must still run alongside it."
+  (let ((pretty-view-head-functions
+         (list (lambda () "<meta name=\"global-head\">"))))
+    (with-temp-buffer
+      (add-hook 'pretty-view-head-functions
+               (lambda () "<meta name=\"local-head\">")
+               nil t)
+      (let ((html (pretty-view-html-document "")))
+        (should (string-match-p "name=\"global-head\"" html))
+        (should (string-match-p "name=\"local-head\"" html))))))
+
+(ert-deftest pretty-view-html-test-body-filter-buffer-local-and-global-both-run ()
+  "A buffer-local body filter must not error on the `t' sentinel, and the
+global body filter must still run alongside it."
+  (let ((pretty-view-body-filter-functions
+         (list (lambda (b) (concat b "<!--global-filter-->")))))
+    (with-temp-buffer
+      (add-hook 'pretty-view-body-filter-functions
+               (lambda (b) (concat b "<!--local-filter-->"))
+               nil t)
+      (let ((html (pretty-view-html-document "x")))
+        (should (string-match-p "<!--global-filter-->" html))
+        (should (string-match-p "<!--local-filter-->" html))))))
 
 (provide 'pretty-view-html-test)
 ;;; pretty-view-html-test.el ends here

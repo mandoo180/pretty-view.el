@@ -27,6 +27,10 @@
 (require 'seq)
 (require 'subr-x)
 
+;; Defined here (and, harmlessly redundantly, in pretty-view-theme.el and
+;; pretty-view-html.el) so each of those files' defcustoms resolve when
+;; the file is loaded on its own, without pulling in the rest of the
+;; package -- not an accidental copy-paste.
 (defgroup pretty-view nil
   "Render Org, Markdown, and text buffers to styled HTML."
   :group 'convenience
@@ -169,6 +173,11 @@ when fontification fails."
 (defcustom pretty-view-allow-raw-html t
   "When non-nil, emit raw HTML found in the source.
 When nil, raw HTML is escaped and shown as text.
+
+This governs only the Markdown renderer's raw HTML blocks and inline
+tags.  It has no effect on Org buffers: an Org `#+BEGIN_EXPORT html'
+block is emitted by `ox-html' under Org's own export settings,
+regardless of this variable.
 
 WARNING: Rendering an untrusted document is outside the package's threat
 model.  Setting this to nil reduces but does not eliminate exposure to

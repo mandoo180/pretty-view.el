@@ -77,6 +77,26 @@
   (should (equal (pretty-view-gfm--slug "  spaced  out  ") "spaced-out"))
   (should (equal (pretty-view-gfm--slug "한글 제목") "한글-제목")))
 
+(ert-deftest pretty-view-gfm-test-slug-outside-parse-is-not-deduplicated ()
+  "Calling the slug function directly, outside a parse, stays pure."
+  (should (equal (pretty-view-gfm--slug "Same") "same"))
+  (should (equal (pretty-view-gfm--slug "Same") "same")))
+
+(ert-deftest pretty-view-gfm-test-duplicate-headings-get-unique-ids ()
+  "Two headings with the same text must not produce the same id."
+  (let* ((blocks (pv-test-blocks "# Same\n\ntext one\n\n# Same\n\ntext two\n\n# Same\n"))
+         (headings (seq-filter (lambda (n) (eq (pv-test-type n) 'heading)) blocks))
+         (ids (mapcar (lambda (n) (plist-get n :id)) headings)))
+    (should (equal ids '("same" "same-2" "same-3")))
+    (should (= (length ids) (length (delete-dups (copy-sequence ids)))))))
+
+(ert-deftest pretty-view-gfm-test-slug-counter-resets-between-parses ()
+  "The de-duplication counter must not leak from one document to the next."
+  (pretty-view-gfm-parse "# Same\n\n# Same\n")
+  (let* ((blocks (pv-test-blocks "# Same\n"))
+         (ids (mapcar (lambda (n) (plist-get n :id)) blocks)))
+    (should (equal ids '("same")))))
+
 (ert-deftest pretty-view-gfm-test-parse-returns-document ()
   (let ((doc (pretty-view-gfm-parse "hi")))
     (should (eq (plist-get doc :type) 'document))
@@ -130,6 +150,13 @@
     (should (eq (pv-test-type node) 'code-block))
     (should (null (plist-get node :lang)))
     (should (equal (plist-get node :code) "indented\nlines\n"))))
+
+(ert-deftest pretty-view-gfm-test-indented-code-preserves-internal-blank-lines ()
+  "Blank lines inside an indented code block keep their position and count."
+  (let ((node (pv-test-block "    line1\n    line2\n\n\n    line3\n    line4")))
+    (should (eq (pv-test-type node) 'code-block))
+    (should (equal (plist-get node :code)
+                   "line1\nline2\n\n\nline3\nline4\n"))))
 
 (ert-deftest pretty-view-gfm-test-indented-code-not-after-paragraph ()
   "An indented line continuing a paragraph is paragraph text."
