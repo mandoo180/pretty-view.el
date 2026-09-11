@@ -66,5 +66,35 @@
 (ert-deftest pretty-view-text-test-empty-input ()
   (should (equal (pretty-view-text-body "") "")))
 
+(ert-deftest pretty-view-text-test-autolink-never-truncates-an-entity ()
+  "Trimming must run on the raw URL, never on escaped text."
+  (let ((html (pretty-view-text-body "see https://e.com/?a=1& end")))
+    (should (string-match-p "href=\"https://e.com/\\?a=1&amp;\"" html))
+    (should-not (string-match-p "&amp[^;]" html))))
+
+(ert-deftest pretty-view-text-test-trimmed-punctuation-is-kept-as-text ()
+  "Characters trimmed off a URL still belong to the paragraph."
+  (let ((html (pretty-view-text-body "see https://e.com. Done")))
+    (should (string-match-p "href=\"https://e.com\"" html))
+    (should (string-match-p "</a>\\. Done" html))))
+
+(ert-deftest pretty-view-text-test-autolink-matches-markdown-path ()
+  "The same input must give the same href in both modes."
+  (dolist (input '("see https://e.com. Done"
+                   "see https://e.com/a_(b) end"
+                   "url https://e.com/?x=1&y=2 end"
+                   "trailing https://e.com/?a=1& end"
+                   "paren (https://e.com) end"))
+    (let (plain md)
+      (let ((pretty-view-text-as-markdown nil))
+        (let ((h (pretty-view-text-body input)))
+          (when (string-match "href=\"\\([^\"]*\\)\"" h)
+            (setq plain (match-string 1 h)))))
+      (let ((pretty-view-text-as-markdown t))
+        (let ((h (pretty-view-text-body input)))
+          (when (string-match "href=\"\\([^\"]*\\)\"" h)
+            (setq md (match-string 1 h)))))
+      (should (equal plain md)))))
+
 (provide 'pretty-view-text-test)
 ;;; pretty-view-text-test.el ends here

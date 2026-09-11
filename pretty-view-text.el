@@ -38,17 +38,38 @@
 (defconst pretty-view-text--url-re "\\bhttps?://[^ \t\n<>\"]+"
   "Match a bare URL in plain text.")
 
-(defun pretty-view-text--autolink (escaped)
-  "Return ESCAPED, already HTML-escaped, with bare URLs turned into links.
-URLs are trimmed of trailing punctuation per GFM autolink rules."
-  (replace-regexp-in-string
-   pretty-view-text--url-re
-   (lambda (url)
-     ;; URL is escaped text, so it is safe in both the href and the body.
-     ;; Trim trailing punctuation, being careful with escaped entities.
-     (let ((trimmed (pretty-view-gfm--trim-url-punctuation url)))
-       (format "<a href=\"%s\">%s</a>" trimmed trimmed)))
-   escaped t t))
+(defun pretty-view-text--autolink-raw (raw-text)
+  "Process RAW-TEXT, escaping it and turning bare URLs into links.
+Trimming happens on raw text before escaping, avoiding entity truncation.
+Returns escaped HTML with <a> tags for URLs and escaped text for non-URLs."
+  (let ((result "")
+        (pos 0))
+    ;; Loop through all URL matches in the raw text
+    (while (string-match pretty-view-text--url-re raw-text pos)
+      ;; Escape and append text before the URL match
+      (let ((before-text (substring raw-text pos (match-beginning 0))))
+        (setq result (concat result (pretty-view-escape-html before-text))))
+
+      ;; Process the matched URL
+      (let* ((raw-url (match-string 0 raw-text))
+             (trimmed-url (pretty-view-gfm--trim-url-punctuation raw-url))
+             (escaped-url (pretty-view-escape-html trimmed-url))
+             (trimmed-off (substring raw-url (length trimmed-url))))
+
+        ;; Create the link with escaped URL for both href and body
+        (setq result (concat result (format "<a href=\"%s\">%s</a>" escaped-url escaped-url)))
+
+        ;; The trimmed-off characters belong to the paragraph, so escape and append them
+        (setq result (concat result (pretty-view-escape-html trimmed-off))))
+
+      ;; Move position to after the URL match
+      (setq pos (match-end 0)))
+
+    ;; Escape and append any remaining text after the last URL
+    (let ((remaining (substring raw-text pos)))
+      (setq result (concat result (pretty-view-escape-html remaining))))
+
+    result))
 
 (defun pretty-view-text-body (text)
   "Return TEXT rendered as an HTML body.
@@ -65,8 +86,7 @@ Line endings are normalized to LF, allowing CRLF and old Mac CR line endings."
       (mapconcat
        (lambda (para)
          (format "<p class=\"pv-text\">%s</p>\n"
-                 (pretty-view-text--autolink
-                  (pretty-view-escape-html (string-trim para)))))
+                 (pretty-view-text--autolink-raw (string-trim para))))
        paragraphs ""))))
 
 (provide 'pretty-view-text)
