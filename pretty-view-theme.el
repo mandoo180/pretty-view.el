@@ -235,7 +235,7 @@ Slots omitted from PALETTE inherit `pretty-view-theme-default-palette'.
 Signals when PALETTE names a slot that does not exist or is malformed.
 Values are inserted into CSS verbatim, so they must be valid CSS and
 must not contain `;' or `}'."
-  (when (oddp (length palette))
+  (when (= 1 (% (length palette) 2))
     (error "pretty-view: Malformed palette plist in theme `%s'" name))
   (let ((legal (pretty-view-theme--slots))
         (keys (seq-filter #'keywordp palette)))
