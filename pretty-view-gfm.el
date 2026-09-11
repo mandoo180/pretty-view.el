@@ -565,6 +565,19 @@ Return a cons of the node and the position after it, or nil."
   "Return STRING with inline markup removed, for use as image alt text."
   (replace-regexp-in-string "[][*_`~]" "" string))
 
+(defun pretty-view-gfm--trim-url-punctuation (url)
+  "Trim trailing punctuation from URL per GFM autolink rules.
+Strip trailing .,:;!? unconditionally.
+Then drop trailing ) only while ) count exceeds ( count."
+  ;; First, strip trailing run of sentence punctuation (no parens).
+  (let ((trimmed (replace-regexp-in-string "[.,:;!?]+\\'" "" url)))
+    ;; Then, drop trailing ) only when unbalanced.
+    (while (and (string-suffix-p ")" trimmed)
+                (> (seq-count (lambda (c) (eq c ?\))) trimmed)
+                   (seq-count (lambda (c) (eq c ?\()) trimmed)))
+      (setq trimmed (substring trimmed 0 -1)))
+    trimmed))
+
 (defun pretty-view-gfm--parse-inlines (string)
   "Parse STRING into a list of inline nodes."
   (let ((nodes nil) (buf "") (i 0) (n (length string)))
@@ -646,8 +659,7 @@ Return a cons of the node and the position after it, or nil."
             (let* ((sub (substring string i))
                    (url (progn (string-match pretty-view-gfm--bare-url-re sub)
                                (match-string 1 sub)))
-                   ;; Trailing punctuation is sentence punctuation, not URL.
-                   (url (replace-regexp-in-string "[.,:;!?)]+\\'" "" url)))
+                   (url (pretty-view-gfm--trim-url-punctuation url)))
               (flush)
               (push (list :type 'autolink :href url
                           :children (list (list :type 'text :value url)))

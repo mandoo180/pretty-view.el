@@ -455,6 +455,24 @@
   (let ((node (pv-test-inline "see https://example.com." 1)))
     (should (equal (plist-get node :href) "https://example.com"))))
 
+(ert-deftest pretty-view-gfm-test-bare-url-keeps-balanced-parens ()
+  "A closing paren that balances an opening one belongs to the URL."
+  (let ((node (pv-test-inline "see https://e.com/a_(b) end" 1)))
+    (should (eq (pv-test-type node) 'autolink))
+    (should (equal (plist-get node :href) "https://e.com/a_(b)"))))
+
+(ert-deftest pretty-view-gfm-test-bare-url-drops-unbalanced-paren ()
+  "A closing paren with no opener is sentence punctuation."
+  (let* ((nodes (plist-get (pv-test-block "(see https://e.com) end") :children))
+         (node (seq-find (lambda (n) (eq (plist-get n :type) 'autolink)) nodes)))
+    (should (equal (plist-get node :href) "https://e.com"))))
+
+(ert-deftest pretty-view-gfm-test-bare-url-drops-trailing-sentence-punctuation ()
+  (should (equal (plist-get (pv-test-inline "see https://e.com." 1) :href)
+                 "https://e.com"))
+  (should (equal (plist-get (pv-test-inline "see https://e.com?!" 1) :href)
+                 "https://e.com")))
+
 (ert-deftest pretty-view-gfm-test-footnote-reference ()
   (let ((node (pv-test-inline "text[^a]" 1)))
     (should (eq (pv-test-type node) 'footnote-reference))
