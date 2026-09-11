@@ -20,7 +20,9 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'pretty-view-render)
+(require 'pretty-view-gfm)
 
 (ert-deftest pretty-view-render-test-escape-ampersand-first ()
   "Ampersands must be escaped before the entities we introduce."
@@ -122,6 +124,126 @@
       (should (string-match-p "<span class=\"pv-keyword\">aaa</span>" html))
       (should (string-match-p "<span class=\"pv-string\">ccc</span>" html))
       (should (string-match-p ">bbb<\\| bbb " html)))))
+
+(defun pv-render (markdown)
+  "Parse MARKDOWN and render it to HTML."
+  (pretty-view-render-document (pretty-view-gfm-parse markdown)))
+
+(ert-deftest pretty-view-render-test-heading ()
+  (should (equal (pv-render "# Hi") "<h1 id=\"hi\">Hi</h1>\n")))
+
+(ert-deftest pretty-view-render-test-paragraph ()
+  (should (equal (pv-render "text") "<p>text</p>\n")))
+
+(ert-deftest pretty-view-render-test-emphasis-and-strong ()
+  (should (equal (pv-render "*a* **b**")
+                 "<p><em>a</em> <strong>b</strong></p>\n")))
+
+(ert-deftest pretty-view-render-test-strikethrough ()
+  (should (equal (pv-render "~~x~~") "<p><del>x</del></p>\n")))
+
+(ert-deftest pretty-view-render-test-code-span-escapes ()
+  (should (equal (pv-render "`<b>`") "<p><code>&lt;b&gt;</code></p>\n")))
+
+(ert-deftest pretty-view-render-test-code-block-has-language-class ()
+  (let ((html (pv-render "```elisp\n(foo)\n```")))
+    (should (string-match-p "<pre class=\"pv-code\"" html))
+    (should (string-match-p "language-elisp" html))))
+
+(ert-deftest pretty-view-render-test-link ()
+  (should (equal (pv-render "[t](https://e.com)")
+                 "<p><a href=\"https://e.com\">t</a></p>\n")))
+
+(ert-deftest pretty-view-render-test-link-title-and-escaping ()
+  (should (string-match-p "title=\"A &amp; B\""
+                          (pv-render "[t](https://e.com \"A & B\")"))))
+
+(ert-deftest pretty-view-render-test-image ()
+  (should (equal (pv-render "![a](i.png)")
+                 "<p><img src=\"i.png\" alt=\"a\" /></p>\n")))
+
+(ert-deftest pretty-view-render-test-bullet-list ()
+  (should (equal (pv-render "- a\n- b")
+                 "<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n")))
+
+(ert-deftest pretty-view-render-test-ordered-list-start ()
+  (should (string-match-p "<ol start=\"3\">" (pv-render "3. a"))))
+
+(ert-deftest pretty-view-render-test-task-item ()
+  (let ((html (pv-render "- [x] done")))
+    (should (string-match-p "class=\"pv-task\"" html))
+    (should (string-match-p "checked" html))
+    (should (string-match-p "disabled" html))))
+
+(ert-deftest pretty-view-render-test-blockquote ()
+  (should (equal (pv-render "> q")
+                 "<blockquote>\n<p>q</p>\n</blockquote>\n")))
+
+(ert-deftest pretty-view-render-test-thematic-break ()
+  (should (equal (pv-render "---") "<hr />\n")))
+
+(ert-deftest pretty-view-render-test-table ()
+  (let ((html (pv-render "| a |\n|:--|\n| 1 |")))
+    (should (string-match-p "<table" html))
+    (should (string-match-p "<th style=\"text-align:left\">a</th>" html))
+    (should (string-match-p "<td style=\"text-align:left\">1</td>" html))))
+
+(ert-deftest pretty-view-render-test-raw-html-passthrough ()
+  (let ((pretty-view-allow-raw-html t))
+    (should (string-match-p "<div>" (pv-render "<div>\n</div>")))))
+
+(ert-deftest pretty-view-render-test-raw-html-escaped-when-disallowed ()
+  (let ((pretty-view-allow-raw-html nil))
+    (should (string-match-p "&lt;div&gt;" (pv-render "<div>\n</div>")))))
+
+(ert-deftest pretty-view-render-test-user-renderer-override ()
+  (let ((pretty-view-renderers
+         (cons '(thematic-break . (lambda (_node _render) "<hr class=\"x\">"))
+               pretty-view-renderers)))
+    (should (equal (pv-render "---") "<hr class=\"x\">"))))
+
+(ert-deftest pretty-view-render-test-signalling-renderer-falls-back ()
+  "A broken override must not lose the document."
+  (let* ((warned nil)
+         (pretty-view-renderers
+          (cons '(thematic-break . (lambda (_n _r) (error "boom")))
+                pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning)
+               (lambda (&rest _) (setq warned t))))
+      (should (equal (pv-render "---") "<hr />\n"))
+      (should warned))))
+
+(ert-deftest pretty-view-render-test-unknown-node-type-renders-children ()
+  (should (equal (pretty-view-render-node
+                  '(:type no-such-type
+                    :children ((:type text :value "x"))))
+                 "x")))
+
+(ert-deftest pretty-view-render-test-soft-break-becomes-newline ()
+  (should (equal (pv-render "a\nb") "<p>a\nb</p>\n")))
+
+(ert-deftest pretty-view-render-test-hard-break ()
+  (should (equal (pv-render "a  \nb") "<p>a<br />\nb</p>\n")))
+
+(ert-deftest pretty-view-render-test-footnotes ()
+  (let ((html (pv-render "text[^a]\n\n[^a]: note")))
+    (should (string-match-p "id=\"fnref-a\"" html))
+    (should (string-match-p "href=\"#fn-a\"" html))
+    (should (string-match-p "id=\"fn-a\"" html))))
+
+(ert-deftest pretty-view-render-test-table-ragged-body-fewer-cells ()
+  "A body row with fewer cells than the header should render without error."
+  (let ((html (pv-render "| a | b |\n|---|---|\n| 1 |")))
+    (should (string-match-p "<th" html))
+    (should (string-match-p "<td" html))
+    (should-not (string-match-p "error" html))))
+
+(ert-deftest pretty-view-render-test-table-ragged-body-more-cells ()
+  "A body row with more cells than the header should render without error."
+  (let ((html (pv-render "| a |\n|---|\n| 1 | 2 |")))
+    (should (string-match-p "<th" html))
+    (should (string-match-p "<td" html))
+    (should-not (string-match-p "error" html))))
 
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here

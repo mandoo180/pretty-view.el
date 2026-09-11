@@ -166,5 +166,240 @@ when fontification fails."
   "Return STRING escaped for use inside an HTML attribute value."
   (pretty-view-escape-html string))
 
+(defcustom pretty-view-allow-raw-html t
+  "When non-nil, emit raw HTML found in the source.
+When nil, raw HTML is escaped and shown as text."
+  :type 'boolean
+  :group 'pretty-view)
+
+(defun pretty-view-render--attr (name value)
+  "Return ` NAME=\"VALUE\"' escaped, or an empty string when VALUE is nil."
+  (if (and value (not (string-empty-p value)))
+      (format " %s=\"%s\"" name (pretty-view-escape-attribute value))
+    ""))
+
+(defun pretty-view-render--align-style (align)
+  "Return a `style' attribute for ALIGN, or an empty string."
+  (if align (format " style=\"text-align:%s\"" align) ""))
+
+(defun pretty-view-render-heading (node render)
+  "Render heading NODE using RENDER for its children."
+  (let ((level (plist-get node :level)))
+    (format "<h%d%s>%s</h%d>\n" level
+            (pretty-view-render--attr "id" (plist-get node :id))
+            (funcall render (plist-get node :children))
+            level)))
+
+(defun pretty-view-render-paragraph (node render)
+  "Render paragraph NODE using RENDER for its children."
+  (format "<p>%s</p>\n" (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-code-block (node _render)
+  "Render code block NODE."
+  (let ((lang (plist-get node :lang)))
+    (format "<pre class=\"pv-code\"><code%s>%s</code></pre>\n"
+            (if lang (format " class=\"language-%s\""
+                             (pretty-view-escape-attribute lang)) "")
+            (pretty-view-render-fontified-code (plist-get node :code) lang))))
+
+(defun pretty-view-render-list (node render)
+  "Render list NODE using RENDER for its items."
+  (let ((ordered (plist-get node :ordered))
+        (start (plist-get node :start)))
+    (format "<%s%s>\n%s</%s>\n"
+            (if ordered "ol" "ul")
+            (if (and ordered start (/= start 1))
+                (format " start=\"%d\"" start) "")
+            (funcall render (plist-get node :children))
+            (if ordered "ol" "ul"))))
+
+(defun pretty-view-render--item-body (node render)
+  "Render the children of list item NODE using RENDER.
+A single paragraph is unwrapped so tight lists read as one line."
+  (let ((kids (plist-get node :children)))
+    (if (and (= (length kids) 1)
+             (eq (plist-get (car kids) :type) 'paragraph))
+        (funcall render (plist-get (car kids) :children))
+      (concat "\n" (funcall render kids)))))
+
+(defun pretty-view-render-list-item (node render)
+  "Render list item NODE using RENDER for its children."
+  (format "<li>%s</li>\n" (pretty-view-render--item-body node render)))
+
+(defun pretty-view-render-task-item (node render)
+  "Render task list item NODE using RENDER for its children."
+  (format "<li class=\"pv-task\"><input type=\"checkbox\" disabled%s /> %s</li>\n"
+          (if (plist-get node :checked) " checked" "")
+          (pretty-view-render--item-body node render)))
+
+(defun pretty-view-render-blockquote (node render)
+  "Render block quote NODE using RENDER for its children."
+  (format "<blockquote>\n%s</blockquote>\n"
+          (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-table (node render)
+  "Render table NODE using RENDER for its rows."
+  (let* ((rows (plist-get node :children))
+         (head (seq-filter (lambda (r) (plist-get r :header)) rows))
+         (body (seq-remove (lambda (r) (plist-get r :header)) rows)))
+    (format "<table class=\"pv-table\">\n%s%s</table>\n"
+            (if head (format "<thead>\n%s</thead>\n" (funcall render head)) "")
+            (if body (format "<tbody>\n%s</tbody>\n" (funcall render body)) ""))))
+
+(defun pretty-view-render-table-row (node render)
+  "Render table row NODE using RENDER for its cells."
+  (format "<tr>%s</tr>\n" (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-table-cell (node render)
+  "Render table cell NODE using RENDER for its children."
+  (let ((tag (if (plist-get node :header) "th" "td")))
+    (format "<%s%s>%s</%s>" tag
+            (pretty-view-render--align-style (plist-get node :align))
+            (funcall render (plist-get node :children))
+            tag)))
+
+(defun pretty-view-render-link (node render)
+  "Render link NODE using RENDER for its children."
+  (format "<a href=\"%s\"%s>%s</a>"
+          (pretty-view-escape-attribute (plist-get node :href))
+          (pretty-view-render--attr "title" (plist-get node :title))
+          (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-image (node _render)
+  "Render image NODE."
+  (format "<img src=\"%s\" alt=\"%s\"%s />"
+          (pretty-view-escape-attribute (plist-get node :src))
+          (pretty-view-escape-attribute (or (plist-get node :alt) ""))
+          (pretty-view-render--attr "title" (plist-get node :title))))
+
+(defun pretty-view-render-footnote-reference (node _render)
+  "Render footnote reference NODE."
+  (let ((label (pretty-view-escape-attribute (plist-get node :label))))
+    (format
+     "<sup class=\"pv-fnref\" id=\"fnref-%s\"><a href=\"#fn-%s\">%s</a></sup>"
+     label label (pretty-view-escape-html (plist-get node :label)))))
+
+(defun pretty-view-render-footnote-definition (node render)
+  "Render footnote definition NODE using RENDER for its children."
+  (let ((label (pretty-view-escape-attribute (plist-get node :label))))
+    (format
+     "<div class=\"pv-footnote\" id=\"fn-%s\"><sup>%s</sup> %s<a class=\"pv-fnback\" href=\"#fnref-%s\">↩</a></div>\n"
+     label (pretty-view-escape-html (plist-get node :label))
+     (funcall render (plist-get node :children)) label)))
+
+(defun pretty-view-render-raw-html (node _render)
+  "Render raw HTML NODE, honouring `pretty-view-allow-raw-html'."
+  (let ((html (or (plist-get node :html) "")))
+    (if pretty-view-allow-raw-html
+        html
+      (pretty-view-escape-html html))))
+
+(defun pretty-view-render-container (node render)
+  "Render NODE by rendering its children with RENDER and nothing else."
+  (funcall render (plist-get node :children)))
+
+(defun pretty-view-render-text (node _render)
+  "Render text NODE as escaped HTML."
+  (pretty-view-escape-html (plist-get node :value)))
+
+(defun pretty-view-render-emphasis (node render)
+  "Render emphasis NODE using RENDER for its children."
+  (format "<em>%s</em>" (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-strong (node render)
+  "Render strong NODE using RENDER for its children."
+  (format "<strong>%s</strong>" (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-strikethrough (node render)
+  "Render strikethrough NODE using RENDER for its children."
+  (format "<del>%s</del>" (funcall render (plist-get node :children))))
+
+(defun pretty-view-render-code-span (node _render)
+  "Render inline code NODE."
+  (format "<code>%s</code>"
+          (pretty-view-escape-html (plist-get node :code))))
+
+(defun pretty-view-render-thematic-break (_node _render)
+  "Render a thematic break."
+  "<hr />\n")
+
+(defun pretty-view-render-line-break (_node _render)
+  "Render a hard line break."
+  "<br />\n")
+
+(defun pretty-view-render-soft-break (_node _render)
+  "Render a soft line break as a newline in the source."
+  "\n")
+
+(defcustom pretty-view-renderers
+  '((document    . pretty-view-render-container)
+    (heading     . pretty-view-render-heading)
+    (paragraph   . pretty-view-render-paragraph)
+    (code-block  . pretty-view-render-code-block)
+    (blockquote  . pretty-view-render-blockquote)
+    (list        . pretty-view-render-list)
+    (list-item   . pretty-view-render-list-item)
+    (task-item   . pretty-view-render-task-item)
+    (table       . pretty-view-render-table)
+    (table-row   . pretty-view-render-table-row)
+    (table-cell  . pretty-view-render-table-cell)
+    (thematic-break . pretty-view-render-thematic-break)
+    (html-block  . pretty-view-render-raw-html)
+    (html-inline . pretty-view-render-raw-html)
+    (footnote-definition . pretty-view-render-footnote-definition)
+    (footnote-reference  . pretty-view-render-footnote-reference)
+    (text        . pretty-view-render-text)
+    (emphasis    . pretty-view-render-emphasis)
+    (strong      . pretty-view-render-strong)
+    (strikethrough . pretty-view-render-strikethrough)
+    (code-span   . pretty-view-render-code-span)
+    (link        . pretty-view-render-link)
+    (autolink    . pretty-view-render-link)
+    (image       . pretty-view-render-image)
+    (line-break  . pretty-view-render-line-break)
+    (soft-break  . pretty-view-render-soft-break))
+  "Map an AST node type to the function that renders it.
+Each function is called as (FN NODE RENDER), where RENDER takes a list
+of nodes and returns their concatenated HTML, and returns an HTML
+string.  A function that signals falls back to the built-in renderer
+for that node type and logs a warning."
+  :type '(alist :key-type symbol :value-type function)
+  :group 'pretty-view)
+
+(defvar pretty-view-render--builtin-renderers
+  (copy-alist pretty-view-renderers)
+  "The renderer table as shipped, used as the fallback for a broken override.")
+
+(defun pretty-view-render-nodes (nodes)
+  "Return the concatenated HTML of NODES."
+  (mapconcat #'pretty-view-render-node nodes ""))
+
+(defun pretty-view-render-node (node)
+  "Return the HTML for NODE, dispatching through `pretty-view-renderers'."
+  (let* ((type (plist-get node :type))
+         (fn (cdr (assq type pretty-view-renderers))))
+    (cond
+     ((null fn)
+      ;; An unknown type still renders its children, so a user-added node
+      ;; type degrades to its content rather than vanishing.
+      (pretty-view-render-nodes (plist-get node :children)))
+     (t
+      (condition-case err
+          (funcall fn node #'pretty-view-render-nodes)
+        (error
+         (display-warning
+          'pretty-view
+          (format "renderer for `%s' signalled: %s; using the built-in"
+                  type (error-message-string err))
+          :warning)
+         (let ((builtin (cdr (assq type pretty-view-render--builtin-renderers))))
+           (if builtin
+               (funcall builtin node #'pretty-view-render-nodes)
+             (pretty-view-render-nodes (plist-get node :children))))))))))
+
+(defun pretty-view-render-document (node)
+  "Return the HTML body for document NODE."
+  (pretty-view-render-node node))
+
 (provide 'pretty-view-render)
 ;;; pretty-view-render.el ends here
