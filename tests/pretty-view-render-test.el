@@ -245,5 +245,36 @@
     (should (string-match-p "<td" html))
     (should-not (string-match-p "error" html))))
 
+(ert-deftest pretty-view-render-test-fallback-survives-a-preset-renderers-value ()
+  "The built-in table must not be a copy of a user's customization."
+  (let ((pretty-view-renderers
+         '((thematic-break . (lambda (_n _r) (error "user-broken-hr"))))))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest _) nil)))
+      (should (equal (pretty-view-render-node '(:type thematic-break))
+                     "<hr />\n")))))
+
+(ert-deftest pretty-view-render-test-render-never-signals-when-builtin-breaks ()
+  "If even the built-in signals, the node degrades to its children."
+  (let ((pretty-view-renderers
+         (cons '(paragraph . (lambda (_n _r) (error "boom")))
+               pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest _) nil))
+              ((symbol-function 'pretty-view-render-paragraph)
+               (lambda (&rest _) (error "builtin also broken"))))
+      (should (equal (pretty-view-render-node
+                      '(:type paragraph :children ((:type text :value "x"))))
+                     "x")))))
+
+(ert-deftest pretty-view-render-test-whole-document-survives-one-bad-node ()
+  "One broken renderer must not destroy the rest of the document."
+  (let ((pretty-view-renderers
+         (cons '(thematic-break . (lambda (_n _r) (error "boom")))
+               pretty-view-renderers)))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest _) nil)))
+      (let ((html (pretty-view-render-document
+                   (pretty-view-gfm-parse "# A\n\n---\n\n# B"))))
+        (should (string-match-p "<h1[^>]*>A</h1>" html))
+        (should (string-match-p "<h1[^>]*>B</h1>" html))))))
+
 (provide 'pretty-view-render-test)
 ;;; pretty-view-render-test.el ends here

@@ -168,7 +168,13 @@ when fontification fails."
 
 (defcustom pretty-view-allow-raw-html t
   "When non-nil, emit raw HTML found in the source.
-When nil, raw HTML is escaped and shown as text."
+When nil, raw HTML is escaped and shown as text.
+
+WARNING: Rendering an untrusted document is outside the package's threat
+model.  Setting this to nil reduces but does not eliminate exposure to
+injected content—raw HTML blocks and JavaScript URLs in links both reach
+the browser.  This option is for controlling your own markup, not a
+security boundary."
   :type 'boolean
   :group 'pretty-view)
 
@@ -331,7 +337,7 @@ A single paragraph is unwrapped so tight lists read as one line."
   "Render a soft line break as a newline in the source."
   "\n")
 
-(defcustom pretty-view-renderers
+(defconst pretty-view-render--default-renderers
   '((document    . pretty-view-render-container)
     (heading     . pretty-view-render-heading)
     (paragraph   . pretty-view-render-paragraph)
@@ -358,6 +364,12 @@ A single paragraph is unwrapped so tight lists read as one line."
     (image       . pretty-view-render-image)
     (line-break  . pretty-view-render-line-break)
     (soft-break  . pretty-view-render-soft-break))
+  "The renderer table as shipped.  Never customized; used as the fallback
+when a user renderer signals.  Users customize `pretty-view-renderers'
+instead.")
+
+(defcustom pretty-view-renderers
+  (copy-alist pretty-view-render--default-renderers)
   "Map an AST node type to the function that renders it.
 Each function is called as (FN NODE RENDER), where RENDER takes a list
 of nodes and returns their concatenated HTML, and returns an HTML
@@ -365,10 +377,6 @@ string.  A function that signals falls back to the built-in renderer
 for that node type and logs a warning."
   :type '(alist :key-type symbol :value-type function)
   :group 'pretty-view)
-
-(defvar pretty-view-render--builtin-renderers
-  (copy-alist pretty-view-renderers)
-  "The renderer table as shipped, used as the fallback for a broken override.")
 
 (defun pretty-view-render-nodes (nodes)
   "Return the concatenated HTML of NODES."
@@ -392,9 +400,11 @@ for that node type and logs a warning."
           (format "renderer for `%s' signalled: %s; using the built-in"
                   type (error-message-string err))
           :warning)
-         (let ((builtin (cdr (assq type pretty-view-render--builtin-renderers))))
+         (let ((builtin (cdr (assq type pretty-view-render--default-renderers))))
            (if builtin
-               (funcall builtin node #'pretty-view-render-nodes)
+               (condition-case nil
+                   (funcall builtin node #'pretty-view-render-nodes)
+                 (error (pretty-view-render-nodes (plist-get node :children))))
              (pretty-view-render-nodes (plist-get node :children))))))))))
 
 (defun pretty-view-render-document (node)
