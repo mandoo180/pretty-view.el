@@ -886,6 +886,7 @@ nor a blank line followed by more of the same list."
   (string-match pretty-view-gfm--list-item-re (car lines))
   (let* ((ordered (pretty-view-gfm--list-ordered-p (car lines)))
          (start (if ordered (string-to-number (match-string 3 (car lines))) 1))
+         (first-indent (length (match-string 1 (car lines))))
          (items nil) (body nil) (rest lines) (tight t) (pending-blank nil)
          (done nil))
     (while (and rest (not done))
@@ -896,12 +897,16 @@ nor a blank line followed by more of the same list."
           (setq rest (cdr rest)))
          ;; A sibling marker at the same nesting level starts a new item.
          ((and (string-match pretty-view-gfm--list-item-re line)
-               (< (length (match-string 1 line)) 4)
+               (= (length (match-string 1 line)) first-indent)
                (eq (and (match-string 3 line) t) (and ordered t)))
-          (when body
-            (push (pretty-view-gfm--item-node (nreverse body)) items)
-            (when pending-blank (setq tight nil)))
-          (setq body (list (or (match-string 4 line) "")))
+          ;; Read the content out of the match BEFORE building the previous
+          ;; item: --item-node calls --parse-blocks, which runs its own
+          ;; regexps and clobbers the match data this line still needs.
+          (let ((content (or (match-string 4 line) "")))
+            (when body
+              (push (pretty-view-gfm--item-node (nreverse body)) items)
+              (when pending-blank (setq tight nil)))
+            (setq body (list content)))
           (setq pending-blank nil)
           (setq rest (cdr rest)))
          ;; An indented line continues the current item.
@@ -940,6 +945,20 @@ clause and before the indented-code clause:
 The thematic-break guard matters because `- - -` matches both patterns and
 must stay a break; the earlier thematic-break clause already handles it,
 and this guard documents the intent.
+
+Two details in `pretty-view-gfm--take-list` are load-bearing, and both were
+wrong in an earlier draft of this plan:
+
+- The sibling test compares the marker's indentation against
+  `first-indent`, the indentation of the list's own first marker — **not**
+  against a fixed `< 4`. With a fixed bound, `"- a\n  - b"` reads the
+  indented marker as a sibling and nesting never happens, which fails
+  `pretty-view-gfm-test-nested-list`.
+- The new item's content is read out of the match data **before**
+  `pretty-view-gfm--item-node` runs. That function calls
+  `pretty-view-gfm--parse-blocks`, whose own regexps overwrite the match
+  data, so a later `(match-string 4 line)` would return text from an
+  unrelated match. Every item after the first would take the wrong string.
 
 Also add `(string-match-p pretty-view-gfm--list-item-re line)` and
 `(string-match-p pretty-view-gfm--quote-re line)` to the interrupt test in
