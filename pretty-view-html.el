@@ -193,18 +193,24 @@ Remote URLs, unreadable files, and files over
 
 ;; Document shell
 
-(cl-defun pretty-view-html-document (body &key title base-directory live)
+(cl-defun pretty-view-html-document (body &key title base-directory live toc)
   "Wrap BODY in a complete HTML document and return it.
 TITLE names the document, BASE-DIRECTORY resolves relative image paths,
-and LIVE non-nil embeds the reload script."
+LIVE non-nil embeds the reload script, and TOC overrides `pretty-view-toc'
+when provided (accepting `none to suppress the shell TOC).  When TOC is
+nil, it defaults to `pretty-view-toc'."
   (let* ((body (seq-reduce (lambda (acc fn) (or (funcall fn acc) acc))
                            pretty-view-body-filter-functions body))
          (body (pretty-view-html--inline-assets
                 body (or base-directory default-directory)))
-         (depth (cond ((integerp pretty-view-toc) pretty-view-toc)
-                      (pretty-view-toc 6)
+         (depth (cond ((eq toc 'none) nil)
+                      ((integerp toc) toc)
+                      ((eq toc t) 6)
+                      ((null toc) (cond ((integerp pretty-view-toc) pretty-view-toc)
+                                        (pretty-view-toc 6)
+                                        (t nil)))
                       (t nil)))
-         (toc (and depth (pretty-view-html--toc body depth)))
+         (toc-html (and depth (pretty-view-html--toc body depth)))
          (head (mapconcat (lambda (fn) (or (funcall fn) ""))
                           pretty-view-head-functions "\n")))
     (concat
@@ -215,7 +221,7 @@ and LIVE non-nil embeds the reload script."
      "<style>\n" (pretty-view-theme-css pretty-view-theme) "</style>\n"
      (if (string-empty-p head) "" (concat head "\n"))
      "</head>\n<body>\n<main class=\"pv-doc\">\n"
-     (or toc "")
+     (or toc-html "")
      body
      "</main>\n"
      (if live (pretty-view-html--live-script) "")
