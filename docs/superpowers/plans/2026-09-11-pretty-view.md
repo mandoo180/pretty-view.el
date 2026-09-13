@@ -4776,8 +4776,8 @@ headers matter:
 ```elisp
 ;;; pretty-view.el --- Render Org, Markdown, and text to styled HTML  -*- lexical-binding: t -*-
 
-;; Author: Kyeong Soo Choi <kyeongsoo@douzone.com>
-;; Maintainer: Kyeong Soo Choi <kyeongsoo@douzone.com>
+;; Author: Kyeong Soo Choi <mandoo180@users.noreply.github.com>
+;; Maintainer: Kyeong Soo Choi <mandoo180@users.noreply.github.com>
 ;; URL: https://github.com/mandoo180/pretty-view.el
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "29.1"))

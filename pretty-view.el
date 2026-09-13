@@ -27,8 +27,8 @@
 ;; any single element renders, and `pretty-view-head-functions' adds to
 ;; the document head.  Nothing outside Emacs is required.
 
-;; Author: Kyeong Soo Choi <kyeongsoo@douzone.com>
-;; Maintainer: Kyeong Soo Choi <kyeongsoo@douzone.com>
+;; Author: Kyeong Soo Choi <mandoo180@users.noreply.github.com>
+;; Maintainer: Kyeong Soo Choi <mandoo180@users.noreply.github.com>
 ;; URL: https://github.com/mandoo180/pretty-view.el
 ;; Version: 0.1.0
 ;; The dependency name below must stay lowercase -- `package.el' only
