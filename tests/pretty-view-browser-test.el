@@ -30,19 +30,33 @@
   `(cl-letf (((symbol-function 'pretty-view-browser-wsl-p) (lambda () ,wsl)))
      ,@body))
 
+;; WSL detection only looks at the kernel and environment on GNU/Linux,
+;; so the detection tests pin `system-type' to run the same on any host.
+
 (ert-deftest pretty-view-browser-test-wsl-detection-from-kernel ()
-  (let ((pretty-view-browser--uname "6.6.0-microsoft-standard-WSL2"))
+  (let ((system-type 'gnu/linux)
+        (pretty-view-browser--uname "6.6.0-microsoft-standard-WSL2"))
     (should (pretty-view-browser-wsl-p)))
   (cl-letf (((symbol-function 'getenv) (lambda (&rest _) nil)))
-    (let ((pretty-view-browser--uname "6.6.0-generic"))
+    (let ((system-type 'gnu/linux)
+          (pretty-view-browser--uname "6.6.0-generic"))
       (should-not (pretty-view-browser-wsl-p)))))
 
 (ert-deftest pretty-view-browser-test-wsl-detection-from-env ()
   "Test WSL detection using environment variable alone, without kernel string."
   (cl-letf (((symbol-function 'getenv)
              (lambda (name &rest _) (when (equal name "WSL_DISTRO_NAME") "Ubuntu"))))
-    (let ((pretty-view-browser--uname "6.6.0-generic"))
+    (let ((system-type 'gnu/linux)
+          (pretty-view-browser--uname "6.6.0-generic"))
       (should (pretty-view-browser-wsl-p)))))
+
+(ert-deftest pretty-view-browser-test-wsl-detection-needs-linux ()
+  "Off GNU/Linux nothing counts as WSL, even a WSL kernel string or env."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (name &rest _) (when (equal name "WSL_DISTRO_NAME") "Ubuntu"))))
+    (let ((system-type 'darwin)
+          (pretty-view-browser--uname "6.6.0-microsoft-standard-WSL2"))
+      (should-not (pretty-view-browser-wsl-p)))))
 
 (ert-deftest pretty-view-browser-test-command-uses-explicit-program ()
   (let ((pretty-view-browser "firefox"))
