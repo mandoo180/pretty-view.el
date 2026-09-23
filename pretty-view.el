@@ -20,7 +20,7 @@
 ;; `M-x pretty-view' renders the current Org, Markdown, or plain-text
 ;; buffer to a self-contained HTML file and opens it in the operating
 ;; system's browser.  `M-x pretty-view-live-mode' regenerates on every
-;; save and reloads the browser tab.
+;; save, and the browser tab reloads only when the output changed.
 ;;
 ;; Everything is replaceable: `pretty-view-theme' picks the look,
 ;; `pretty-view-renderers' and `pretty-view-org-transcoders' replace how
@@ -103,10 +103,16 @@ derived from it, so an entry for `outline-mode' would silently override
   "Return the identity used to name this buffer's output file."
   (or buffer-file-name (concat "buffer:" (buffer-name))))
 
+(defun pretty-view--live-file (file)
+  "Return the version script that FILE's live page polls."
+  (concat (file-name-sans-extension file) ".live.js"))
+
 (defun pretty-view-render-buffer-to-file (file &optional live)
   "Render the current buffer into FILE.
-LIVE non-nil embeds the reload script.  Creates FILE's directory when
-it does not exist.  Does not open a browser."
+LIVE non-nil embeds a watcher that reloads the page when a later
+render changes it, and writes the version script it polls; see
+`pretty-view-live-interval'.  Creates FILE's directory when it does not
+exist.  Does not open a browser."
   (let* ((base default-directory)
          (title (pretty-view--title))
          (body (pretty-view-body))
@@ -115,11 +121,22 @@ it does not exist.  Does not open a browser."
          (html (pretty-view-html-document body
                                           :title title
                                           :base-directory base
-                                          :live live
-                                          :toc (if suppress-toc 'none pretty-view-toc))))
+                                          :toc (if suppress-toc 'none pretty-view-toc)))
+         (live-file (and live pretty-view-live-interval
+                         (pretty-view--live-file file)))
+         (version (and live-file
+                       (secure-hash 'sha1 (encode-coding-string html 'utf-8))))
+         (coding-system-for-write 'utf-8-unix))
     (make-directory (file-name-directory file) t)
-    (let ((coding-system-for-write 'utf-8-unix))
-      (with-temp-file file (insert html)))
+    (with-temp-file file
+      (insert (if live-file
+                  (pretty-view-html-add-live-script
+                   html version (file-name-nondirectory live-file))
+                html)))
+    ;; Written after the page, so a reload always finds the new page.
+    (when live-file
+      (with-temp-file live-file
+        (insert (pretty-view-html-live-version-script version))))
     file))
 
 ;;;###autoload
@@ -182,8 +199,9 @@ it does not exist.  Does not open a browser."
 ;;;###autoload
 (define-minor-mode pretty-view-live-mode
   "Regenerate this buffer's rendered HTML on every save.
-The rendered page reloads itself every `pretty-view-live-interval'
-seconds, restoring the scroll position."
+The rendered page checks every `pretty-view-live-interval' seconds
+whether a save changed it, and only then reloads, restoring the
+scroll position."
   :lighter " PV"
   :group 'pretty-view
   (if pretty-view-live-mode

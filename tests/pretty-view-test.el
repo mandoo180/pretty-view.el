@@ -106,16 +106,66 @@
     (pretty-view-live-mode -1)
     (should-not (memq #'pretty-view--live-update after-save-hook))))
 
+(defun pv-test-read (file)
+  "Return FILE's contents."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
+
+(defun pv-test-live-render (out text)
+  "Render TEXT live into OUT; return (EMBEDDED-VERSION . FILE-VERSION)."
+  (pv-in-mode text-mode text
+    ;; The title comes from the buffer name, which must not vary.
+    (rename-buffer "pv-live-test" t)
+    (pretty-view-render-buffer-to-file out t))
+  (let ((html (pv-test-read out))
+        (js (pv-test-read (pretty-view--live-file out))))
+    (cons (and (string-match "var version = '\\([^']+\\)'" html)
+               (match-string 1 html))
+          (and (string-match "prettyViewLive('\\([^']+\\)')" js)
+               (match-string 1 js)))))
+
+(defmacro pv-with-live-out (var &rest body)
+  "Bind VAR to a fresh output path, run BODY, delete both output files."
+  (declare (indent 1))
+  `(let ((,var (make-temp-file "pv" nil ".html")))
+     (unwind-protect (progn ,@body)
+       (delete-file ,var)
+       (delete-file (pretty-view--live-file ,var)))))
+
 (ert-deftest pretty-view-test-live-document-carries-the-script ()
-  (let ((out (make-temp-file "pv" nil ".html")))
-    (unwind-protect
-        (progn
-          (pv-in-mode text-mode "x"
-            (pretty-view-render-buffer-to-file out t))
-          (with-temp-buffer
-            (insert-file-contents out)
-            (should (string-match-p "location.reload" (buffer-string)))))
-      (delete-file out))))
+  (pv-with-live-out out
+    (pv-in-mode text-mode "x"
+      (pretty-view-render-buffer-to-file out t))
+    (should (string-match-p "location.reload" (pv-test-read out)))))
+
+(ert-deftest pretty-view-test-live-version-file-matches-the-page ()
+  (pv-with-live-out out
+    (let ((versions (pv-test-live-render out "x")))
+      (should (car versions))
+      (should (equal (car versions) (cdr versions))))))
+
+(ert-deftest pretty-view-test-live-version-changes-only-with-content ()
+  "Saving unchanged text must not reload the tab; editing it must."
+  (pv-with-live-out out
+    (let* ((first (pv-test-live-render out "one"))
+           (again (pv-test-live-render out "one"))
+           (edited (pv-test-live-render out "two")))
+      (should (equal again first))
+      (should-not (equal (car edited) (car first))))))
+
+(ert-deftest pretty-view-test-non-live-render-has-no-watcher ()
+  (pv-with-live-out out
+    (pv-in-mode text-mode "x" (pretty-view-render-buffer-to-file out))
+    (should-not (string-match-p "<script" (pv-test-read out)))
+    (should-not (file-exists-p (pretty-view--live-file out)))))
+
+(ert-deftest pretty-view-test-nil-interval-disables-the-watcher ()
+  (pv-with-live-out out
+    (let ((pretty-view-live-interval nil))
+      (pv-in-mode text-mode "x" (pretty-view-render-buffer-to-file out t)))
+    (should-not (string-match-p "<script" (pv-test-read out)))
+    (should-not (file-exists-p (pretty-view--live-file out)))))
 
 (ert-deftest pretty-view-test-file-renders-and-does-not-open-a-real-browser ()
   "pretty-view-file must render FILE to HTML without launching a browser."

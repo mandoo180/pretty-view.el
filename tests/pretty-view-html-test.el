@@ -200,20 +200,104 @@ missing/unreadable file."
     (let ((html (pretty-view-html-document "x")))
       (should (string-match-p "<!--1--><!--2-->" html)))))
 
-(ert-deftest pretty-view-html-test-live-script-present-only-when-asked ()
-  (should-not (string-match-p "location.reload"
-                              (pretty-view-html-document "x")))
-  (should (string-match-p "location.reload"
-                          (pretty-view-html-document "x" :live t))))
+;; Live watcher.  The page never reloads on a timer: it polls a tiny
+;; version script and reloads only when the version it reports differs
+;; from the one the page was rendered with.
+
+(defun pv-html-test-live (version &optional src)
+  "Return a document carrying the live watcher for VERSION and SRC."
+  (pretty-view-html-add-live-script (pretty-view-html-document "x")
+                                    version (or src "doc.live.js")))
+
+(ert-deftest pretty-view-html-test-document-has-no-live-script ()
+  (should-not (string-match-p "<script" (pretty-view-html-document "x"))))
+
+(ert-deftest pretty-view-html-test-live-script-goes-before-body-end ()
+  (should (string-suffix-p "</script>\n</body>\n</html>\n"
+                           (pv-html-test-live "v1"))))
+
+(ert-deftest pretty-view-html-test-live-script-embeds-version-and-src ()
+  (let ((html (pv-html-test-live "v1" "doc.live.js")))
+    (should (string-search "'v1'" html))
+    (should (string-search "'doc.live.js?t='" html))))
+
+(ert-deftest pretty-view-html-test-live-script-url-encodes-src ()
+  "Output names keep non-ASCII letters, so the src must be percent-encoded."
+  (should (string-search "'%EB%AC%B8.live.js?t='"
+                         (pv-html-test-live "v1" "문.live.js"))))
 
 (ert-deftest pretty-view-html-test-live-script-honours-interval ()
   (let ((pretty-view-live-interval 3))
-    (should (string-match-p "3000" (pretty-view-html-document "x" :live t)))))
+    (should (string-match-p "3000" (pv-html-test-live "v1")))))
 
-(ert-deftest pretty-view-html-test-live-script-suppressed-by-nil-interval ()
-  (let ((pretty-view-live-interval nil))
-    (should-not (string-match-p "location.reload"
-                                (pretty-view-html-document "x" :live t)))))
+(ert-deftest pretty-view-html-test-live-version-script-reports-version ()
+  (should (equal (pretty-view-html-live-version-script "v2")
+                 "window.prettyViewLive('v2');\n")))
+
+(defun pv-html-test-script (html)
+  "Return the body of the first script element in HTML."
+  (and (string-match "<script>\n\\(\\(?:.\\|\n\\)*?\\)</script>" html)
+       (match-string 1 html)))
+
+(ert-deftest pretty-view-html-test-live-script-reloads-only-on-change ()
+  "Run the watcher in Node against stub browser objects."
+  (skip-unless (executable-find "node"))
+  (let* ((watcher (pv-html-test-script (pv-html-test-live "v1")))
+         (js (concat
+              "(function () {
+var assert = require('assert');
+var reloads = 0, ticks = [], added = [], store = {};
+var window, location, document;
+var sessionStorage = {
+  getItem: function (k) { return k in store ? store[k] : null; },
+  setItem: function (k, v) { store[k] = String(v); }
+};
+function setInterval(f) { ticks.push(f); }
+function openPage() {
+  ticks = []; added = [];
+  window = {scrollY: 0, scrollTo: function () {}, addEventListener: function () {}};
+  location = {pathname: '/doc.html', reload: function () { reloads++; }};
+  document = {
+    visibilityState: 'visible',
+    addEventListener: function () {},
+    createElement: function () { return {remove: function () {}}; },
+    head: {appendChild: function (s) { added.push(s); }}
+  };
+  eval(" (json-encode watcher) ");
+}
+function poll(version) {
+  added = [];
+  ticks[0]();
+  if (document.visibilityState === 'hidden') {
+    assert.strictEqual(added.length, 0, 'a hidden tab must not poll');
+    return;
+  }
+  assert.strictEqual(added.length, 1, 'one poll per tick');
+  assert.match(added[0].src, /^doc\\.live\\.js\\?t=\\d+$/);
+  eval(" (json-encode (pretty-view-html-live-version-script "VERSION")) "
+       .replace('VERSION', version));
+}
+openPage();
+assert.strictEqual(ticks.length, 1, 'one timer');
+poll('v1'); poll('v1'); poll('v1');
+assert.strictEqual(reloads, 0, 'unchanged version must not reload');
+poll('v2');
+assert.strictEqual(reloads, 1, 'changed version reloads');
+openPage();
+poll('v2'); poll('v2');
+assert.strictEqual(reloads, 1, 'a page that is still stale must not loop');
+poll('v3');
+assert.strictEqual(reloads, 2, 'a newer version reloads again');
+document.visibilityState = 'hidden';
+poll('v4');
+assert.strictEqual(reloads, 2);
+console.log('ok');
+})();
+")))
+    (with-temp-buffer
+      (let ((status (call-process "node" nil t nil "-e" js)))
+        (should (equal (list status (string-trim (buffer-string)))
+                       '(0 "ok")))))))
 
 (ert-deftest pretty-view-html-test-head-functions-buffer-local-and-global-both-run ()
   "A buffer-local head function must not error on the `t' sentinel, and

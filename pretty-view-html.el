@@ -1,4 +1,4 @@
-;;; pretty-view-html.el --- Document shell with TOC, asset inlining, live reload  -*- lexical-binding: t -*-
+;;; pretty-view-html.el --- Document shell with TOC, asset inlining, live watcher  -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2026 Kyeong Soo Choi
 
@@ -19,7 +19,7 @@
 
 ;; Wraps a body in a complete HTML document.  Format-agnostic by construction:
 ;; the TOC is extracted from rendered headings, so it works identically for
-;; Org and Markdown.  Also handles asset inlining and live-reload script.
+;; Org and Markdown.  Also handles asset inlining and the live watcher.
 
 ;;; Code:
 
@@ -28,6 +28,7 @@
 (require 'pretty-view-theme)
 (require 'pretty-view-themes)
 (require 'pretty-view-render)
+(require 'url-util)
 
 ;; Duplicated from pretty-view-render.el (`defgroup' merges harmlessly).
 ;; This file's `require's above already pull the group in transitively,
@@ -61,11 +62,9 @@ Larger files are linked with a `file://' URL instead."
   :group 'pretty-view)
 
 (defcustom pretty-view-live-interval 1.5
-  "Seconds between browser reloads in `pretty-view-live-mode'.
-Nil omits the reload script.
-
-On `file://' the page cannot ask whether its source changed, so the
-reload is unconditional and happens even while the document is idle."
+  "Seconds between change checks in `pretty-view-live-mode'.
+The page reloads only when a save changed the rendered output.  Nil
+omits the watcher, so the page never reloads by itself."
   :type '(choice (const :tag "No automatic reload" nil) number)
   :group 'pretty-view)
 
@@ -198,15 +197,24 @@ Remote URLs, unreadable files, and files over
                      (match-string 4 match))))))
      html t)))
 
-;; Live-reload script
+;; Live watcher
+;;
+;; A `file://' page cannot fetch, so it cannot read its own source to see
+;; whether it changed.  It can still load a script, so the renderer writes
+;; a one-line version script next to the page and the page polls that:
+;; it reloads only when the reported version differs from its own.
 
-(defun pretty-view-html--live-script ()
-  "Return the reload script, or an empty string when reloading is off."
-  (if (not pretty-view-live-interval)
-      ""
-    (format "<script>
+(defun pretty-view-html-add-live-script (html version src)
+  "Return HTML with a watcher that reloads it when its version changes.
+VERSION identifies this rendering.  SRC names the version script
+written by `pretty-view-html-live-version-script', relative to the page.
+The watcher polls every `pretty-view-live-interval' seconds, which must
+be a number, and restores the scroll position after a reload."
+  (let ((script (format "<script>
 (function () {
+  var version = '%s';
   var key = 'pv-scroll:' + location.pathname;
+  var tried = 'pv-tried:' + location.pathname;
   try {
     var y = sessionStorage.getItem(key);
     if (y !== null) window.scrollTo(0, parseInt(y, 10));
@@ -214,20 +222,44 @@ Remote URLs, unreadable files, and files over
   window.addEventListener('beforeunload', function () {
     try { sessionStorage.setItem(key, String(window.scrollY)); } catch (e) {}
   });
-  setInterval(function () {
-    if (document.visibilityState !== 'hidden') location.reload();
-  }, %d);
+  window.prettyViewLive = function (v) {
+    if (v === version) return;
+    try {
+      // A page still stale after reloading for V must not reload again.
+      if (sessionStorage.getItem(tried) === v) return;
+      sessionStorage.setItem(tried, v);
+    } catch (e) {}
+    location.reload();
+  };
+  function check() {
+    if (document.visibilityState === 'hidden') return;
+    var s = document.createElement('script');
+    s.src = '%s?t=' + Date.now();
+    s.onload = s.onerror = function () { s.remove(); };
+    document.head.appendChild(s);
+  }
+  document.addEventListener('visibilitychange', check);
+  setInterval(check, %d);
 })();
-</script>\n" (truncate (* 1000 pretty-view-live-interval)))))
+</script>\n" version (url-hexify-string src)
+                        (truncate (* 1000 pretty-view-live-interval)))))
+    (if (string-match "</body>\n</html>\n\\'" html)
+        (concat (substring html 0 (match-beginning 0)) script
+                (substring html (match-beginning 0)))
+      (concat html script))))
+
+(defun pretty-view-html-live-version-script (version)
+  "Return the version script reporting VERSION to a watching page."
+  (format "window.prettyViewLive('%s');\n" version))
 
 ;; Document shell
 
-(cl-defun pretty-view-html-document (body &key title base-directory live toc)
+(cl-defun pretty-view-html-document (body &key title base-directory toc)
   "Wrap BODY in a complete HTML document and return it.
 TITLE names the document, BASE-DIRECTORY resolves relative image paths,
-LIVE non-nil embeds the reload script, and TOC overrides `pretty-view-toc'
-when provided (accepting `none to suppress the shell TOC).  When TOC is
-nil, it defaults to `pretty-view-toc'."
+and TOC overrides `pretty-view-toc' when provided (accepting `none to
+suppress the shell TOC).  When TOC is nil, it defaults to
+`pretty-view-toc'."
   (let* ((body (seq-reduce (lambda (acc fn) (or (funcall fn acc) acc))
                            (pretty-view-html--hook-functions
                             'pretty-view-body-filter-functions)
@@ -257,7 +289,6 @@ nil, it defaults to `pretty-view-toc'."
      (or toc-html "")
      body
      "</main>\n"
-     (if live (pretty-view-html--live-script) "")
      "</body>\n</html>\n")))
 
 (provide 'pretty-view-html)
