@@ -253,7 +253,7 @@ nil, it defaults to `pretty-view-toc'."
      "<title>" (pretty-view-escape-html (or title "Document")) "</title>\n"
      "<style>\n" (pretty-view-theme-css pretty-view-theme) "</style>\n"
      (if (string-empty-p head) "" (concat head "\n"))
-     "</head>\n<body>\n<main class=\"pv-doc\">\n"
+     "</head>\n<body>\n<main class=\"pv-document\">\n"
      (or toc-html "")
      body
      "</main>\n"

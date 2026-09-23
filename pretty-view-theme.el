@@ -75,7 +75,7 @@ body {
   line-height: var(--pv-line-height);
   overflow-wrap: break-word;
 }
-.pv-doc > *:first-child { margin-top: 0; }
+.pv-document > *:first-child { margin-top: 0; }
 
 h1, h2, h3, h4, h5, h6 {
   margin: 2.2em 0 0.7em;

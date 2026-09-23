@@ -35,6 +35,12 @@
     (should (string-match-p "<p>x</p>" html))
     (should (string-suffix-p "</html>\n" html))))
 
+(ert-deftest pretty-view-html-test-main-class-is-not-a-syntax-class ()
+  "The wrapper must not inherit a syntax class's colour and italics."
+  (let ((html (pretty-view-html-document "" :title "T")))
+    (should (string-match "<main class=\"\\([^\"]*\\)\">" html))
+    (should-not (rassoc (match-string 1 html) pretty-view-face-class-alist))))
+
 (ert-deftest pretty-view-html-test-title-is-escaped ()
   (should (string-match-p "<title>a &amp; b</title>"
                           (pretty-view-html-document "" :title "a & b"))))
