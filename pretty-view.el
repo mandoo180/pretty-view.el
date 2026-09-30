@@ -50,6 +50,8 @@
 (require 'pretty-view-browser)
 (require 'pretty-view-links)
 
+(defvar org-export-use-babel)
+
 (defvar pretty-view-live-mode nil
   "Minor mode variable for live rendering.")
 
@@ -133,7 +135,7 @@ SOURCE is read into a temporary buffer that behaves as if it visited
 the file, so its title, base directory, and output file match a
 `pretty-view-file' render.  The major mode comes from the file name,
 but mode hooks do not run.  Links are rewritten as for any page in the
-output directory."
+output directory.  Org Babel blocks are not evaluated."
   ;; Not `with-temp-buffer': Org exports a buffer whose name starts with
   ;; a space to different headline ids than a visited file's buffer, and
   ;; the page must equal a `pretty-view-file' render of the same file.
@@ -147,7 +149,9 @@ output directory."
             (unwind-protect
                 (progn
                   (delay-mode-hooks (set-auto-mode))
-                  (pretty-view--render-html t))
+                  ;; Nothing the user did not open may run code.
+                  (let ((org-export-use-babel nil))
+                    (pretty-view--render-html t)))
               ;; Unmodified and nameless, the buffer dies without a prompt.
               (set-buffer-modified-p nil)
               (setq buffer-file-name nil))))
@@ -184,9 +188,12 @@ when it does not exist.  Does not open a browser."
       (with-temp-file live-file
         (insert (pretty-view-html-live-version-script version))))
     ;; An unsaved buffer's page does not show its file, so it must not
-    ;; count as that file's page when the file is reached by a link.
-    (when (and links (not (buffer-modified-p)))
-      (pretty-view-links-record file page))
+    ;; count as that file's page when the file is reached by a link, and
+    ;; it replaces the record of the page it overwrote.
+    (when links
+      (if (buffer-modified-p)
+          (remhash file pretty-view-links--written)
+        (pretty-view-links-record file page)))
     file))
 
 ;;;###autoload

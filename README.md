@@ -263,6 +263,7 @@ In addition to the extension points above, the following variables control the p
 | `pretty-view-follow-links` | `t` | When non-nil, render linked local documents in the background and link to their pages; when nil, document links open the source file in a new tab |
 | `pretty-view-follow-links-limit` | 200 | Most linked documents one render follows |
 | `pretty-view-follow-links-extensions` | `("md" "markdown" "org" "txt")` | Extensions (lower case, matched case-insensitively) of the linked files that are rendered |
+| `pretty-view-follow-links-max-size` | 1000000 | Largest linked document, in bytes, that is rendered; a larger one opens as the file itself in a new tab |
 
 ### Content Rendering
 
@@ -330,7 +331,7 @@ Rendered pages live in the output directory, not next to their sources, so a rel
 - **A link to any other local file** (JSON, PDF, images, …) opens the file itself in a new tab. Under WSL the link is a `file://wsl.localhost/<distro>/…` URL, or a `file:///C:/…` URL for a file on a Windows drive.
 - Remote URLs, `mailto:` links, and same-page `#` links are left alone.
 
-Linked documents are rendered in the background, breadth-first, and the documents they link to are followed in turn, up to `pretty-view-follow-links-limit` documents. The page you asked for opens immediately. The echo area shows `pretty-view: rendering linked documents 12/55` and then a one-line summary. Emacs stays responsive throughout: each timer tick does at most about 50 ms of work and steps aside whenever you type.
+Linked documents are rendered in the background, breadth-first, and the documents they link to are followed in turn, up to `pretty-view-follow-links-limit` documents. The page you asked for opens immediately. The echo area shows `pretty-view: rendering linked documents 12/55` and then a one-line summary. Emacs stays responsive throughout: each timer tick does about 50 ms of work plus at most one document and steps aside whenever you type. Org Babel blocks in linked documents are never evaluated; their stored `#+RESULTS` are shown. Linked documents are rendered without their mode hooks and file- or directory-local variables, so settings made there (for example a buffer-local `pretty-view-head-functions` entry or a `.dir-locals.el` theme) apply to the page you render directly but not to pages rendered as links.
 
 Every linked document is rendered again on every run, which is cheap, but its page is only rewritten when the HTML changed. This matters under WSL, where each write to the Windows drive takes around 90 ms. The first render in an Emacs session writes every linked page; later renders and live-mode saves write only what changed.
 

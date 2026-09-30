@@ -91,6 +91,8 @@ and classifies each `href`:
 | empty, `#…`, `//…`, or a scheme other than `file:` | untouched |
 | base directory is remote (`file-remote-p`) | untouched |
 | a path, or a `file:` URL, naming no regular file | untouched |
+| a path that resolves to a remote file name (TRAMP syntax, checked without connecting) | untouched |
+| a link that cannot be resolved (for example a NUL byte) | untouched |
 | a document that the run accepts | output file name + fragment, same tab |
 | any other existing local file | file URL + fragment, new tab |
 
@@ -102,10 +104,11 @@ is expanded against the base directory, the source document's directory,
 the same base used for images.
 
 A **document** is a file whose extension, compared case-insensitively,
-is in `pretty-view-follow-links-extensions`. A document is accepted
+is in `pretty-view-follow-links-extensions` and whose size is at most
+`pretty-view-follow-links-max-size` bytes. A document is accepted
 when `pretty-view-follow-links` is non-nil and the current run accepts
 it (§7). A document that is not accepted, because the feature is off or
-the run hit its limit, is treated as any other local file: its raw
+the run hit its limit, is too large, is treated as any other local file: its raw
 source opens in a new tab.
 
 Rewritten `href` values are escaped with `pretty-view-escape-attribute`.
@@ -173,6 +176,8 @@ buffer that behaves as if it visited the file:
   (LSP, linters, and so on) never run.
 - The disk contents are used, even when a buffer visiting the file has
   unsaved changes.
+- `org-export-use-babel` is bound to nil, so Org Babel blocks are never
+  evaluated in the background; stored `#+RESULTS` are shown as they are.
 - Before the buffer is killed it is marked unmodified and its file name
   cleared, so killing it can never prompt.
 
@@ -236,7 +241,8 @@ script, and a background write would silently drop the watcher.
   with `message-log-max` bound to nil, so it does not flood
   `*Messages*`.
 - The summary, `pretty-view: linked documents — 55 written, 0 unchanged,
-  0 failed`, is logged. If the limit was hit, it is followed by
+  0 failed`, is logged, except for a run that wrote nothing, failed
+  nothing, and hit no limit, which is silent. If the limit was hit, it is followed by
   `stopped after 200 linked documents; see
   pretty-view-follow-links-limit`.
 - While the minibuffer is active, progress is not shown at all, and the
@@ -298,6 +304,7 @@ live-mode save of unchanged Org text no longer reloads the tab.
 | `pretty-view-follow-links` | `t` | Render linked documents. Nil: no run, no queue; document links open their raw source in a new tab like any other file |
 | `pretty-view-follow-links-limit` | `200` | Most linked documents one run accepts |
 | `pretty-view-follow-links-extensions` | `("md" "markdown" "org" "txt")` | Extensions treated as documents |
+| `pretty-view-follow-links-max-size` | `1000000` | Largest document, in bytes, that is rendered; a larger one opens as a raw file |
 
 Converting non-document links to file URLs applies to all temp output
 and has no switch: without it those links are always broken.
@@ -319,6 +326,9 @@ LINKS. Non-nil rewrites links and, when following is on, starts a run.
   queue and its duplicate table are cleared, and no further tick is
   scheduled, so the next run starts from a clean state instead of a
   half-updated one.
+- A `quit` that reaches the tick (a prompt during a render) clears the
+  queue and its duplicate table, logs `pretty-view: linked documents
+  cancelled`, and is not re-signalled.
 - No placeholder files are written, so an interrupted Emacs leaves
   nothing to clean up.
 

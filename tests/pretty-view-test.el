@@ -516,7 +516,6 @@ must not pass for its file's page when the file is later reached."
           (with-current-buffer buf
             (pretty-view)
             (should (gethash out pretty-view-links--written))
-            (clrhash pretty-view-links--written)
             (goto-char (point-max))
             (insert "Unsaved.\n")
             (pretty-view)
@@ -526,6 +525,46 @@ must not pass for its file's page when the file is later reached."
             (should-not (gethash out pretty-view-links--written))
             (set-buffer-modified-p nil))
         (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-later-linked-render-replaces-an-unsaved-page ()
+  "A page rendered from unsaved text is replaced by the file's text."
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let* ((a (expand-file-name "a.org" dir))
+           (b (expand-file-name "b.org" dir))
+           (buf (find-file-noselect a)))
+      (unwind-protect
+          (with-current-buffer buf
+            (pretty-view)
+            (goto-char (point-max))
+            (insert "Unsaved text.\n")
+            (pretty-view)
+            (should (string-match-p "Unsaved text" (pv-tree-page a)))
+            (set-buffer-modified-p nil)
+            ;; Another document's run reaches a.org through a link.
+            (with-temp-file b (insert "[[file:a.org][A]]\n"))
+            (let ((pretty-view-links-current-run
+                   (pretty-view-links-start-run
+                    b #'pretty-view--render-linked)))
+              (pretty-view-links-accept a))
+            (while pretty-view-links--queue
+              (pretty-view-links--tick))
+            (should-not (string-match-p "Unsaved text" (pv-tree-page a))))
+        (kill-buffer buf)))))
+
+(defvar pv-babel-flag nil
+  "Set by the Babel block in the linked-render test.")
+
+(ert-deftest pretty-view-test-linked-render-does-not-run-babel ()
+  (pv-with-org-tree dir '(("a.org" . "#+BEGIN_SRC emacs-lisp :exports results
+(setq pv-babel-flag t)
+#+END_SRC
+"))
+    (require 'org)
+    (let ((pv-babel-flag nil)
+          (org-confirm-babel-evaluate nil))
+      (pretty-view--render-linked (expand-file-name "a.org" dir))
+      (should-not pv-babel-flag))))
 
 (provide 'pretty-view-test)
 ;;; pretty-view-test.el ends here

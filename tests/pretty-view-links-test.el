@@ -206,6 +206,45 @@ contents, along with any directory it needs."
                     html "/ssh:host:/x/" #'pv-links-accept-all)
                    html))))
 
+;;; Guarded resolution
+
+(ert-deftest pretty-view-links-test-tramp-shaped-href-is-untouched ()
+  (pv-links-with-tree dir '("doc.md")
+    (let ((html "<a href=\"/ssh:pv-probe-host.invalid:/x.md\">d</a>"))
+      (cl-letf (((symbol-function 'file-regular-p)
+                 (lambda (f)
+                   (when (file-remote-p f)
+                     (error "Connected to %s" f))
+                   nil)))
+        (should (equal (pretty-view-links-rewrite
+                        html dir #'pv-links-accept-all)
+                       html))))))
+
+(ert-deftest pretty-view-links-test-malformed-href-leaves-only-that-link ()
+  (pv-links-with-tree dir '("doc.md")
+    (should (equal (pretty-view-links-rewrite
+                    (concat "<a href=\"a%00b.md\">x</a>"
+                            "<a href=\"doc.md\">d</a>")
+                    dir #'pv-links-accept-all)
+                   (concat "<a href=\"a%00b.md\">x</a>"
+                           "<a href=\"doc-h.html\">d</a>")))))
+
+(ert-deftest pretty-view-links-test-oversized-document-opens-the-file ()
+  (pv-links-with-tree dir '("doc.md")
+    (pv-links-with-urls
+     (let* ((html "<a href=\"doc.md\">d</a>")
+            (accepted nil)
+            (accept (lambda (f) (push f accepted) "/out/doc-h.html")))
+       (let ((pretty-view-follow-links-max-size 0))
+         (should (string-match-p
+                  "href=\"URL:.*doc\\.md\" target=\"_blank\""
+                  (pretty-view-links-rewrite html dir accept)))
+         (should-not accepted))
+       (let ((pretty-view-follow-links-max-size 1))
+         (should (equal (pretty-view-links-rewrite html dir accept)
+                        "<a href=\"doc-h.html\">d</a>"))
+         (should (= (length accepted) 1)))))))
+
 ;;; Queue
 
 (defvar pv-queue-rendered nil
@@ -349,6 +388,18 @@ rewriting would, and returns the resulting links as the page's HTML."
        (should (= (pretty-view-links--run-unchanged run) 2))
        (should (= (pretty-view-links--run-written run) 0))))))
 
+(ert-deftest pretty-view-links-test-no-op-run-logs-no-summary ()
+  (pv-queue-test
+   (let ((graph '(("/s/root.md" "/s/a.md")))
+         (log nil))
+     (pv-queue-start "/s/root.md" graph)
+     (pv-queue-drain)
+     (pv-queue-capturing log
+       (pv-queue-start "/s/root.md" graph)
+       (pv-queue-drain))
+     (should-not (seq-some (lambda (m) (string-search "linked documents" m))
+                           log)))))
+
 (ert-deftest pretty-view-links-test-changed-page-is-rewritten ()
   (pv-queue-test
    (let* ((version 1)
@@ -390,6 +441,21 @@ rewriting would, and returns the resulting links as the page's HTML."
                              (string-match-p
                               "could not render /s/a\\.md (Boom)" m))
                            log)))))))
+
+(ert-deftest pretty-view-links-test-quit-in-a-render-clears-the-queue ()
+  (pv-queue-test
+   (let ((log nil))
+     (pv-queue-capturing log
+       (let ((pretty-view-links-current-run
+              (pretty-view-links-start-run
+               "/s/root.md" (lambda (_s) (signal 'quit nil)))))
+         (pretty-view-links-accept "/s/a.md")
+         (pretty-view-links-accept "/s/b.md"))
+       (pretty-view-links--tick))
+     (should (null pretty-view-links--queue))
+     (should (zerop (hash-table-count pretty-view-links--queued)))
+     (should (null pretty-view-links--timer))
+     (should (member "pretty-view: linked documents cancelled" log)))))
 
 (ert-deftest pretty-view-links-test-live-mode-page-is-left-to-live-mode ()
   (pv-queue-test

@@ -57,6 +57,15 @@ Extensions are compared case-insensitively."
   :type '(repeat string)
   :group 'pretty-view)
 
+(defcustom pretty-view-follow-links-max-size 1000000
+  "Largest linked document, in bytes, that is rendered.
+A linked document bigger than this is not rendered in the background,
+because one huge file would keep Emacs busy for a long time.  A link
+to it opens the file itself in a new tab, like a link to any other
+file."
+  :type 'integer
+  :group 'pretty-view)
+
 ;; Rewriting
 
 (defconst pretty-view-links--anchor-re
@@ -85,7 +94,7 @@ HREF is an attribute value as rendered, still entity-escaped.  FILE is
 its absolute file name, resolved against BASE-DIRECTORY, and FRAGMENT
 its `#' part, or the empty string.  Return nil for a URL with a scheme
 other than `file:', a network-path or same-page reference, and a name
-that is not a regular file."
+that is not a regular file or that resolves to a remote file name."
   (let* ((href (pretty-view-links--unescape href))
          (hash (string-search "#" href))
          (fragment (if hash (substring href hash) ""))
@@ -100,7 +109,10 @@ that is not a regular file."
     (unless (string-empty-p path)
       (let ((file (expand-file-name (pretty-view-links--decode path)
                                     base-directory)))
-        (and (file-regular-p file) (cons file fragment))))))
+        ;; Syntax only: a remote name must never start a connection.
+        (and (not (file-remote-p file))
+             (file-regular-p file)
+             (cons file fragment))))))
 
 (defun pretty-view-links--document-p (file)
   "Return non-nil when FILE's extension marks it as a document.
@@ -108,16 +120,23 @@ See `pretty-view-follow-links-extensions'."
   (let ((ext (file-name-extension file)))
     (and ext (member (downcase ext) pretty-view-follow-links-extensions) t)))
 
+(defun pretty-view-links--followable-p (file)
+  "Return non-nil when FILE is a document small enough to be rendered."
+  (and (pretty-view-links--document-p file)
+       (let ((size (file-attribute-size (file-attributes file))))
+         (and size (<= size pretty-view-follow-links-max-size)))))
+
 (defun pretty-view-links-rewrite (html base-directory accept)
   "Return HTML with its local links rewritten for the output directory.
 BASE-DIRECTORY resolves relative links.  ACCEPT, when non-nil, is
 called with the absolute file name of each linked document, one whose
-extension is in `pretty-view-follow-links-extensions', and returns
+extension is in `pretty-view-follow-links-extensions' and whose size is
+at most `pretty-view-follow-links-max-size', and returns
 the output file to link to, or nil.  A document ACCEPT declines, and
 any other local file, is linked through a URL for the file itself that
 opens in a new tab; see `pretty-view-browser-file-url'.  Remote,
 same-page, and dangling links are left alone, as is everything when
-BASE-DIRECTORY is remote."
+BASE-DIRECTORY is remote.  A link that cannot be resolved is left alone."
   (if (file-remote-p base-directory)
       html
     (with-temp-buffer
@@ -128,12 +147,14 @@ BASE-DIRECTORY is remote."
                (tag (match-string 0))
                (beg (match-beginning 1))
                (end (match-end 1))
-               (local (pretty-view-links--local-file (match-string 1)
-                                                     base-directory)))
+               (local (condition-case nil
+                          (pretty-view-links--local-file (match-string 1)
+                                                         base-directory)
+                        (error nil))))
           (when local
             (let* ((file (car local))
                    (output (and accept
-                                (pretty-view-links--document-p file)
+                                (pretty-view-links--followable-p file)
                                 (funcall accept file))))
               ;; The tag's end is edited first, so BEG and END still
               ;; hold when the href is replaced.
@@ -242,7 +263,8 @@ run is current, or when the current run has already accepted
 (defun pretty-view-links--tick ()
   "Process queued documents for up to 50 ms, then yield to the user.
 Pending input postpones the work.  An error outside any one document
-clears the queue, so the next render starts from a clean state."
+clears the queue, so the next render starts from a clean state, and so
+does a quit."
   ;; Called directly rather than by its timer, the tick must not leave
   ;; that timer to fire later.
   (when pretty-view-links--timer
@@ -264,6 +286,10 @@ clears the queue, so the next render starts from a clean state."
             (cancel-timer pretty-view-links--timer)
             (setq pretty-view-links--timer nil))
           (pretty-view-links--schedule 0.01)))
+    (quit
+     ;; A prompt during a render let the user quit; drop the work.
+     (pretty-view-links-reset)
+     (pretty-view-links--log "pretty-view: linked documents cancelled"))
     (error
      (pretty-view-links-reset)
      (pretty-view-links--log "pretty-view: linked documents stopped (%s)"
@@ -342,11 +368,16 @@ so it never covers a prompt."
          (failed (pretty-view-links--run-failed run))
          (done (+ written unchanged failed))
          (pending (pretty-view-links--run-pending run)))
-    (if (> pending 0)
-        (unless (active-minibuffer-window)
-          (let ((message-log-max nil))
-            (message "pretty-view: rendering linked documents %d/%d"
-                     done (+ done pending))))
+    (cond
+     ((> pending 0)
+      (unless (active-minibuffer-window)
+        (let ((message-log-max nil))
+          (message "pretty-view: rendering linked documents %d/%d"
+                   done (+ done pending)))))
+     ;; A run that changed nothing and hit no limit has nothing to say.
+     ((and (zerop written) (zerop failed)
+           (not (pretty-view-links--run-limit-hit run))))
+     (t
       (pretty-view-links--log
        "pretty-view: linked documents — %d written, %d unchanged, %d failed%s"
        written unchanged failed
@@ -354,7 +385,7 @@ so it never covers a prompt."
            (format (concat "; stopped after %d linked documents; "
                           "see pretty-view-follow-links-limit")
                    pretty-view-follow-links-limit)
-         "")))))
+         ""))))))
 
 (provide 'pretty-view-links)
 ;;; pretty-view-links.el ends here
