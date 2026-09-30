@@ -254,7 +254,15 @@ In addition to the extension points above, the following variables control the p
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `pretty-view-inline-images` | `t` | When non-nil, embed local images as data URIs for a self-contained file |
-| `pretty-view-inline-image-max-bytes` | 2000000 | Maximum image size (in bytes) to embed; larger files are linked as `file://` URLs |
+| `pretty-view-inline-image-max-bytes` | 2000000 | Maximum image size (in bytes) to embed; larger files are linked with a `file://` URL the browser can open (a `wsl.localhost` URL under WSL) |
+
+### Linked Documents
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `pretty-view-follow-links` | `t` | When non-nil, render linked local documents in the background and link to their pages; when nil, document links open the source file in a new tab |
+| `pretty-view-follow-links-limit` | 200 | Most linked documents one render follows |
+| `pretty-view-follow-links-extensions` | `("md" "markdown" "org" "txt")` | Extensions (lower case, matched case-insensitively) of the linked files that are rendered |
 
 ### Content Rendering
 
@@ -314,6 +322,22 @@ A `file://` page cannot fetch anything, so it cannot read its own source to see 
 
 To disable automatic reloads entirely, set `pretty-view-live-interval` to nil. The file will still regenerate on save, but the page carries no watcher.
 
+## Linked Documents
+
+Rendered pages live in the output directory, not next to their sources, so a relative link such as `[Setup](docs/setup.md)` would otherwise break. `pretty-view` rewrites every local link in the page it writes:
+
+- **A link to another document** (`.md`, `.markdown`, `.org`, `.txt`) points at that document's rendered page, which opens in the same tab with the same theme. Fragments such as `#installation` are kept.
+- **A link to any other local file** (JSON, PDF, images, …) opens the file itself in a new tab. Under WSL the link is a `file://wsl.localhost/<distro>/…` URL, or a `file:///C:/…` URL for a file on a Windows drive.
+- Remote URLs, `mailto:` links, and same-page `#` links are left alone.
+
+Linked documents are rendered in the background, breadth-first, and the documents they link to are followed in turn, up to `pretty-view-follow-links-limit` documents. The page you asked for opens immediately. The echo area shows `pretty-view: rendering linked documents 12/55` and then a one-line summary. Emacs stays responsive throughout: each timer tick does at most about 50 ms of work and steps aside whenever you type.
+
+Every linked document is rendered again on every run, which is cheap, but its page is only rewritten when the HTML changed. This matters under WSL, where each write to the Windows drive takes around 90 ms. The first render in an Emacs session writes every linked page; later renders and live-mode saves write only what changed.
+
+On the very first render of a set of documents, a link clicked before the background reaches it shows the browser's "file not found" page; reload it a moment later. Links are processed in document order, so the first ones are ready first.
+
+`pretty-view-export` rewrites nothing: it writes a single file where you choose, typically next to the sources, where relative links already work.
+
 ## Threat Model
 
 The package is designed for rendering documents you author or trust. Raw HTML and `javascript:` URLs in the source both reach the browser unchanged, so:
@@ -328,7 +352,7 @@ If you must render external content, filter it through a sanitizer before render
 - Serve over HTTP or provide a local web server
 - Synchronize the cursor or scroll position between Emacs and the browser
 - Export to PDF or other formats
-- Generate multi-file sites
+- Generate multi-file sites (linked local documents are rendered alongside the page, nothing more)
 - Bundle Mermaid, KaTeX, or other JavaScript libraries; use `pretty-view-head-functions` to add them
 
 ## License
