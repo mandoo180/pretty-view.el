@@ -152,5 +152,203 @@ BASE-DIRECTORY is remote."
           (set-marker tag-end nil)))
       (buffer-string))))
 
+;; Runs and the background queue
+
+(cl-defstruct (pretty-view-links--run
+               (:constructor pretty-view-links--make-run)
+               (:copier nil))
+  "One render's walk over the documents it links to, and its tallies."
+  (render nil)
+  (visited (make-hash-table :test #'equal))
+  (count 0)
+  (limit-hit nil)
+  (pending 0)
+  (written 0)
+  (unchanged 0)
+  (failed 0))
+
+(defvar pretty-view-links-current-run nil
+  "The run that the document being rendered belongs to, or nil.
+`pretty-view-links-accept' queues linked documents into this run.")
+
+(defvar pretty-view-links--queue nil
+  "Documents waiting to be rendered, oldest first.
+Each entry is a list (SOURCE OUTPUT RUN).")
+
+(defvar pretty-view-links--queued (make-hash-table :test #'equal)
+  "Output files that have an entry in `pretty-view-links--queue'.")
+
+(defvar pretty-view-links--timer nil
+  "The timer for the next tick of the queue, or nil.")
+
+(defvar pretty-view-links--written (make-hash-table :test #'equal)
+  "Map an output file to the SHA-1 of the HTML last written to it.")
+
+(defun pretty-view-links-start-run (root render)
+  "Return a new run for ROOT that renders linked documents with RENDER.
+ROOT is the rendered document's absolute file name, or nil when it has
+none.  RENDER is called with a linked document's absolute file name
+while `pretty-view-links-current-run' is bound to the run, and returns
+the document's HTML."
+  (let ((run (pretty-view-links--make-run :render render)))
+    (when root
+      (puthash root t (pretty-view-links--run-visited run)))
+    run))
+
+(defun pretty-view-links-accept (source)
+  "Return the output file to link SOURCE to, queueing SOURCE when new.
+SOURCE is a linked document's absolute file name.  Return nil when no
+run is current, or when the current run has already accepted
+`pretty-view-follow-links-limit' documents."
+  (let ((run pretty-view-links-current-run))
+    (when run
+      (let ((visited (pretty-view-links--run-visited run))
+            (output (pretty-view-browser-output-file source)))
+        (cond
+         ((gethash source visited) output)
+         ((>= (pretty-view-links--run-count run)
+              pretty-view-follow-links-limit)
+          (setf (pretty-view-links--run-limit-hit run) t)
+          nil)
+         (t
+          (puthash source t visited)
+          (cl-incf (pretty-view-links--run-count run))
+          (pretty-view-links--enqueue source output run)
+          output))))))
+
+(defun pretty-view-links--enqueue (source output run)
+  "Queue SOURCE, rendered to OUTPUT, for RUN, unless OUTPUT is queued."
+  (unless (gethash output pretty-view-links--queued)
+    (puthash output t pretty-view-links--queued)
+    (cl-incf (pretty-view-links--run-pending run))
+    (setq pretty-view-links--queue
+          (nconc pretty-view-links--queue (list (list source output run))))
+    (pretty-view-links--schedule 0)))
+
+(defun pretty-view-links--schedule (delay)
+  "Run the next tick of the queue in DELAY seconds, unless one is due."
+  (unless pretty-view-links--timer
+    (setq pretty-view-links--timer
+          (run-at-time delay nil #'pretty-view-links--tick))))
+
+(defun pretty-view-links-reset ()
+  "Drop every queued document and cancel the pending tick."
+  (when pretty-view-links--timer
+    (cancel-timer pretty-view-links--timer))
+  (setq pretty-view-links--timer nil
+        pretty-view-links--queue nil)
+  (clrhash pretty-view-links--queued))
+
+(defun pretty-view-links--tick ()
+  "Process queued documents for up to 50 ms, then yield to the user.
+Pending input postpones the work.  An error outside any one document
+clears the queue, so the next render starts from a clean state."
+  ;; Called directly rather than by its timer, the tick must not leave
+  ;; that timer to fire later.
+  (when pretty-view-links--timer
+    (cancel-timer pretty-view-links--timer)
+    (setq pretty-view-links--timer nil))
+  (condition-case err
+      (if (input-pending-p)
+          (pretty-view-links--schedule 0.2)
+        (let ((deadline (time-add nil 0.05)))
+          (while (progn
+                   (pretty-view-links--process (pop pretty-view-links--queue))
+                   (and pretty-view-links--queue
+                        (not (input-pending-p))
+                        (time-less-p nil deadline)))))
+        (when pretty-view-links--queue
+          (pretty-view-links--schedule 0.01)))
+    (error
+     (pretty-view-links-reset)
+     (pretty-view-links--log "pretty-view: linked documents stopped (%s)"
+                             (error-message-string err)))))
+
+(defun pretty-view-links--process (item)
+  "Render ITEM, a queue entry (SOURCE OUTPUT RUN), and write it if changed."
+  (when item
+    (let ((source (nth 0 item))
+          (output (nth 1 item))
+          (run (nth 2 item)))
+      (remhash output pretty-view-links--queued)
+      (condition-case err
+          (let ((html (let ((pretty-view-links-current-run run))
+                        (funcall (pretty-view-links--run-render run) source))))
+            (if (or (pretty-view-links--owned-by-live-mode-p source output)
+                    (pretty-view-links--unchanged-p output html))
+                (cl-incf (pretty-view-links--run-unchanged run))
+              (pretty-view-links-write output html)
+              (cl-incf (pretty-view-links--run-written run))))
+        (error
+         (cl-incf (pretty-view-links--run-failed run))
+         (pretty-view-links--log "pretty-view: could not render %s (%s)"
+                                 source (error-message-string err))))
+      (cl-decf (pretty-view-links--run-pending run))
+      (pretty-view-links--report run))))
+
+(defun pretty-view-links--owned-by-live-mode-p (source output)
+  "Return non-nil when a live-mode buffer maintains OUTPUT for SOURCE.
+That buffer's saves write the page with the watcher that reloads it,
+which a background write would drop."
+  (let ((buffer (find-buffer-visiting source)))
+    (and buffer
+         (local-variable-p 'pretty-view-live-mode buffer)
+         (buffer-local-value 'pretty-view-live-mode buffer)
+         (file-exists-p output))))
+
+;; Unchanged pages
+
+(defun pretty-view-links--hash (html)
+  "Return the SHA-1 of HTML's UTF-8 encoding."
+  (secure-hash 'sha1 (encode-coding-string html 'utf-8)))
+
+(defun pretty-view-links-record (file html)
+  "Remember that FILE now holds HTML."
+  (puthash file (pretty-view-links--hash html) pretty-view-links--written))
+
+(defun pretty-view-links--unchanged-p (output html)
+  "Return non-nil when OUTPUT exists and last received exactly HTML."
+  (and (equal (gethash output pretty-view-links--written)
+              (pretty-view-links--hash html))
+       (file-exists-p output)))
+
+(defun pretty-view-links-write (file html)
+  "Write HTML to FILE, creating its directory, and record it."
+  (let ((coding-system-for-write 'utf-8-unix))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (insert html)))
+  (pretty-view-links-record file html))
+
+;; Messages
+
+(defun pretty-view-links--log (format-string &rest args)
+  "Log the message that FORMAT-STRING and ARGS make.
+While the minibuffer is active the message only goes to `*Messages*',
+so it never covers a prompt."
+  (let ((inhibit-message (or inhibit-message
+                             (and (active-minibuffer-window) t))))
+    (apply #'message format-string args)))
+
+(defun pretty-view-links--report (run)
+  "Show RUN's progress, or its summary once nothing of it is pending."
+  (let* ((written (pretty-view-links--run-written run))
+         (unchanged (pretty-view-links--run-unchanged run))
+         (failed (pretty-view-links--run-failed run))
+         (done (+ written unchanged failed))
+         (pending (pretty-view-links--run-pending run)))
+    (if (> pending 0)
+        (unless (active-minibuffer-window)
+          (let ((message-log-max nil))
+            (message "pretty-view: rendering linked documents %d/%d"
+                     done (+ done pending))))
+      (pretty-view-links--log
+       "pretty-view: linked documents — %d written, %d unchanged, %d failed%s"
+       written unchanged failed
+       (if (pretty-view-links--run-limit-hit run)
+           (format "; stopped after %d, see `pretty-view-follow-links-limit'"
+                   pretty-view-follow-links-limit)
+         "")))))
+
 (provide 'pretty-view-links)
 ;;; pretty-view-links.el ends here

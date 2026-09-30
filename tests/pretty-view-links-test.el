@@ -206,5 +206,270 @@ contents, along with any directory it needs."
                     html "/ssh:host:/x/" #'pv-links-accept-all)
                    html))))
 
+;;; Queue
+
+(defvar pv-queue-rendered nil
+  "Sources the fake render function was called with, in order.")
+
+(defmacro pv-queue-test (&rest body)
+  "Run BODY with an empty queue and page table, and fresh output."
+  `(let ((pretty-view-links--queue nil)
+         (pretty-view-links--queued (make-hash-table :test #'equal))
+         (pretty-view-links--timer nil)
+         (pretty-view-links--written (make-hash-table :test #'equal))
+         (pretty-view-links-current-run nil)
+         (pretty-view-output-directory (make-temp-file "pv-out" t))
+         (pv-queue-rendered nil))
+     (unwind-protect (progn ,@body)
+       (pretty-view-links-reset)
+       (delete-directory pretty-view-output-directory t))))
+
+(defun pv-queue-render (graph)
+  "Return a fake render function over GRAPH.
+GRAPH is an alist (SOURCE . LINKED-SOURCES).  Rendering SOURCE records
+it in `pv-queue-rendered', accepts each linked source as link
+rewriting would, and returns the resulting links as the page's HTML."
+  (lambda (source)
+    (setq pv-queue-rendered (append pv-queue-rendered (list source)))
+    (mapconcat (lambda (s) (or (pretty-view-links-accept s) "declined"))
+               (cdr (assoc source graph))
+               "\n")))
+
+(defun pv-queue-start (root graph)
+  "Start a run at ROOT over GRAPH and accept ROOT's links; return it."
+  (let ((pretty-view-links-current-run
+         (pretty-view-links-start-run root (pv-queue-render graph))))
+    (dolist (s (cdr (assoc root graph)))
+      (pretty-view-links-accept s))
+    pretty-view-links-current-run))
+
+(defun pv-queue-drain ()
+  "Tick the queue until it is empty."
+  (while pretty-view-links--queue
+    (pretty-view-links--tick)))
+
+(defun pv-queue-page (source)
+  "Return the contents of SOURCE's output file, or nil when absent."
+  (let ((out (pretty-view-browser-output-file source)))
+    (and (file-exists-p out)
+         (with-temp-buffer (insert-file-contents out) (buffer-string)))))
+
+(defmacro pv-queue-capturing (log &rest body)
+  "Run BODY, pushing every formatted `message' onto the list LOG."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'message)
+              (lambda (fmt &rest args)
+                (push (apply #'format fmt args) ,log))))
+     ,@body))
+
+(ert-deftest pretty-view-links-test-accept-without-a-run ()
+  (pv-queue-test
+   (should (null (pretty-view-links-accept "/s/a.md")))
+   (should (null pretty-view-links--queue))))
+
+(ert-deftest pretty-view-links-test-queue-renders-breadth-first ()
+  (pv-queue-test
+   (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")
+                                  ("/s/a.md" "/s/c.md")))
+   (pv-queue-drain)
+   (should (equal pv-queue-rendered '("/s/a.md" "/s/b.md" "/s/c.md")))
+   (should (pv-queue-page "/s/c.md"))))
+
+(ert-deftest pretty-view-links-test-queue-survives-a-cycle ()
+  (pv-queue-test
+   (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md")
+                                  ("/s/a.md" "/s/b.md")
+                                  ("/s/b.md" "/s/a.md" "/s/root.md")))
+   (pv-queue-drain)
+   (should (equal pv-queue-rendered '("/s/a.md" "/s/b.md")))))
+
+(ert-deftest pretty-view-links-test-back-link-to-root-is-linked-not-queued ()
+  (pv-queue-test
+   (let ((run (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md")
+                                              ("/s/a.md" "/s/root.md")))))
+     (pv-queue-drain)
+     (should (equal (pv-queue-page "/s/a.md")
+                    (pretty-view-browser-output-file "/s/root.md")))
+     (should (= (pretty-view-links--run-count run) 1)))))
+
+(ert-deftest pretty-view-links-test-self-link-is-not-queued ()
+  "Review focus: a root linking to itself, as a `#section' link would."
+  (pv-queue-test
+   (let ((pretty-view-links-current-run
+          (pretty-view-links-start-run "/s/root.md" #'ignore)))
+     (should (equal (pretty-view-links-accept "/s/root.md")
+                    (pretty-view-browser-output-file "/s/root.md")))
+     (should (null pretty-view-links--queue)))))
+
+(ert-deftest pretty-view-links-test-document-linked-twice-is-queued-once ()
+  "Review focus: the same document linked from several places."
+  (pv-queue-test
+   (pv-queue-start "/s/root.md"
+                   '(("/s/root.md" "/s/a.md" "/s/a.md" "/s/a.md")))
+   (should (= (length pretty-view-links--queue) 1))))
+
+(ert-deftest pretty-view-links-test-runs-share-queued-documents ()
+  (pv-queue-test
+   (pv-queue-start "/s/one.md" '(("/s/one.md" "/s/a.md")))
+   (let ((two (pv-queue-start "/s/two.md" '(("/s/two.md" "/s/a.md")))))
+     (should (= (length pretty-view-links--queue) 1))
+     (should (= (pretty-view-links--run-pending two) 0)))))
+
+(ert-deftest pretty-view-links-test-limit-declines-and-is-reported ()
+  (pv-queue-test
+   (let ((pretty-view-follow-links-limit 2)
+         (log nil))
+     (pv-queue-capturing log
+       (let ((run (pv-queue-start
+                   "/s/root.md"
+                   '(("/s/root.md" "/s/a.md" "/s/b.md" "/s/c.md")))))
+         (should (pretty-view-links--run-limit-hit run))
+         (should (= (length pretty-view-links--queue) 2))
+         (pv-queue-drain)
+         (should (string-match-p "stopped after 2" (car log))))))))
+
+(ert-deftest pretty-view-links-test-unchanged-page-is-not-rewritten ()
+  (pv-queue-test
+   (let ((graph '(("/s/root.md" "/s/a.md") ("/s/a.md" "/s/c.md"))))
+     (pv-queue-start "/s/root.md" graph)
+     (pv-queue-drain)
+     ;; Mark a's page: if the second run rewrote it, the mark would go.
+     (with-temp-file (pretty-view-browser-output-file "/s/a.md")
+       (insert "MARK"))
+     (setq pv-queue-rendered nil)
+     (let ((run (pv-queue-start "/s/root.md" graph)))
+       (pv-queue-drain)
+       (should (equal (pv-queue-page "/s/a.md") "MARK"))
+       ;; Its links were still followed.
+       (should (equal pv-queue-rendered '("/s/a.md" "/s/c.md")))
+       (should (= (pretty-view-links--run-unchanged run) 2))
+       (should (= (pretty-view-links--run-written run) 0))))))
+
+(ert-deftest pretty-view-links-test-changed-page-is-rewritten ()
+  (pv-queue-test
+   (let* ((version 1)
+          (render (lambda (s) (format "%s v%d" s version))))
+     (dotimes (_ 2)
+       (let ((pretty-view-links-current-run
+              (pretty-view-links-start-run "/s/root.md" render)))
+         (pretty-view-links-accept "/s/a.md"))
+       (pv-queue-drain)
+       (should (equal (pv-queue-page "/s/a.md")
+                      (format "/s/a.md v%d" version)))
+       (setq version 2)))))
+
+(ert-deftest pretty-view-links-test-deleted-page-is-rewritten ()
+  (pv-queue-test
+   (let ((graph '(("/s/root.md" "/s/a.md"))))
+     (pv-queue-start "/s/root.md" graph)
+     (pv-queue-drain)
+     (delete-file (pretty-view-browser-output-file "/s/a.md"))
+     (pv-queue-start "/s/root.md" graph)
+     (pv-queue-drain)
+     (should (pv-queue-page "/s/a.md")))))
+
+(ert-deftest pretty-view-links-test-failure-is-isolated-and-logged ()
+  (pv-queue-test
+   (let ((log nil))
+     (pv-queue-capturing log
+       (let* ((render (lambda (s)
+                        (if (equal s "/s/a.md") (error "Boom") "ok")))
+              (run (pretty-view-links-start-run "/s/root.md" render)))
+         (let ((pretty-view-links-current-run run))
+           (pretty-view-links-accept "/s/a.md")
+           (pretty-view-links-accept "/s/b.md"))
+         (pv-queue-drain)
+         (should (= (pretty-view-links--run-failed run) 1))
+         (should (= (pretty-view-links--run-written run) 1))
+         (should (pv-queue-page "/s/b.md"))
+         (should (seq-some (lambda (m)
+                             (string-match-p
+                              "could not render /s/a\\.md (Boom)" m))
+                           log)))))))
+
+(ert-deftest pretty-view-links-test-live-mode-page-is-left-to-live-mode ()
+  (pv-queue-test
+   (let* ((src (make-temp-file "pv-live" nil ".txt"))
+          (out (pretty-view-browser-output-file src))
+          (buf (find-file-noselect src)))
+     (unwind-protect
+         (progn
+           (with-current-buffer buf (setq-local pretty-view-live-mode t))
+           (with-temp-file out (insert "LIVE PAGE"))
+           (let ((run (pretty-view-links-start-run
+                       nil (lambda (_s) "background"))))
+             (let ((pretty-view-links-current-run run))
+               (pretty-view-links-accept src))
+             (pv-queue-drain)
+             (should (equal (pv-queue-page src) "LIVE PAGE"))
+             (should (= (pretty-view-links--run-unchanged run) 1)))
+           ;; With no page yet, the background writes one.
+           (delete-file out)
+           (let ((pretty-view-links-current-run
+                  (pretty-view-links-start-run
+                   nil (lambda (_s) "background"))))
+             (pretty-view-links-accept src))
+           (pv-queue-drain)
+           (should (equal (pv-queue-page src) "background")))
+       (kill-buffer buf)
+       (delete-file src)))))
+
+(ert-deftest pretty-view-links-test-summary-counts ()
+  (pv-queue-test
+   (let ((log nil))
+     (pv-queue-capturing log
+       (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")))
+       (pv-queue-drain))
+     (should (equal (car log)
+                    (concat "pretty-view: linked documents — "
+                            "2 written, 0 unchanged, 0 failed")))
+     (should (member "pretty-view: rendering linked documents 1/2" log)))))
+
+(ert-deftest pretty-view-links-test-quiet-while-minibuffer-is-active ()
+  (pv-queue-test
+   (let ((log nil))
+     (cl-letf (((symbol-function 'active-minibuffer-window) (lambda () t))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args)
+                  (push (cons inhibit-message (apply #'format fmt args))
+                        log))))
+       (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")))
+       (pv-queue-drain))
+     ;; No progress; the summary is logged but not displayed.
+     (should (= (length log) 1))
+     (should (car (car log)))
+     (should (string-match-p "2 written" (cdr (car log)))))))
+
+(ert-deftest pretty-view-links-test-pending-input-defers-the-work ()
+  (pv-queue-test
+   (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md")))
+   (cl-letf (((symbol-function 'input-pending-p) (lambda (&rest _) t)))
+     (pretty-view-links--tick))
+   (should (= (length pretty-view-links--queue) 1))
+   (should (null pv-queue-rendered))
+   (should (timerp pretty-view-links--timer))))
+
+(ert-deftest pretty-view-links-test-bookkeeping-error-clears-the-queue ()
+  (pv-queue-test
+   (let ((log nil))
+     (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")))
+     (pv-queue-capturing log
+       (cl-letf (((symbol-function 'pretty-view-links--report)
+                  (lambda (_run) (error "Bug"))))
+         (pretty-view-links--tick)))
+     (should (null pretty-view-links--queue))
+     (should (zerop (hash-table-count pretty-view-links--queued)))
+     (should (null pretty-view-links--timer))
+     (should (string-match-p "linked documents stopped (Bug)" (car log))))))
+
+(ert-deftest pretty-view-links-test-write-creates-directory-and-records ()
+  (pv-queue-test
+   (let ((file (expand-file-name "deep/er/p.html"
+                                 pretty-view-output-directory)))
+     (pretty-view-links-write file "<p>é</p>")
+     (should (file-exists-p file))
+     (should (pretty-view-links--unchanged-p file "<p>é</p>"))
+     (should-not (pretty-view-links--unchanged-p file "<p>e</p>")))))
+
 (provide 'pretty-view-links-test)
 ;;; pretty-view-links-test.el ends here
