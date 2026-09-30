@@ -326,7 +326,11 @@ rewriting would, and returns the resulting links as the page's HTML."
          (should (pretty-view-links--run-limit-hit run))
          (should (= (length pretty-view-links--queue) 2))
          (pv-queue-drain)
-         (should (string-match-p "stopped after 2" (car log))))))))
+         (should (equal (car log)
+                        (concat "pretty-view: linked documents — "
+                                "2 written, 0 unchanged, 0 failed; "
+                                "stopped after 2 linked documents; "
+                                "see pretty-view-follow-links-limit"))))))))
 
 (ert-deftest pretty-view-links-test-unchanged-page-is-not-rewritten ()
   (pv-queue-test
@@ -448,6 +452,32 @@ rewriting would, and returns the resulting links as the page's HTML."
    (should (= (length pretty-view-links--queue) 1))
    (should (null pv-queue-rendered))
    (should (timerp pretty-view-links--timer))))
+
+(ert-deftest pretty-view-links-test-tick-reschedules-itself-at-10-ms ()
+  "A render that queues a document must not make the next tick due now."
+  (pv-queue-test
+   (let ((scheduled nil)
+         (cancelled nil))
+     (cl-letf (((symbol-function 'run-at-time)
+                (lambda (delay &rest _)
+                  (let ((timer (timer-create)))
+                    (push (cons delay timer) scheduled)
+                    timer)))
+               ((symbol-function 'cancel-timer)
+                (lambda (timer) (push timer cancelled)))
+               ((symbol-function 'input-pending-p) (lambda (&rest _) nil))
+               ((symbol-function 'time-less-p) (lambda (&rest _) nil)))
+       ;; root links a and b; rendering a queues c.
+       (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")
+                                      ("/s/a.md" "/s/c.md")))
+       (setq scheduled nil cancelled nil)
+       (pretty-view-links--tick)
+       (should (equal pv-queue-rendered '("/s/a.md")))
+       (should (= (length pretty-view-links--queue) 2))
+       (let ((live (seq-remove (lambda (entry) (memq (cdr entry) cancelled))
+                               scheduled)))
+         (should (equal (mapcar #'car live) '(0.01)))
+         (should (eq (cdr (car live)) pretty-view-links--timer)))))))
 
 (ert-deftest pretty-view-links-test-bookkeeping-error-clears-the-queue ()
   (pv-queue-test

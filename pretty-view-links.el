@@ -258,6 +258,11 @@ clears the queue, so the next render starts from a clean state."
                         (not (input-pending-p))
                         (time-less-p nil deadline)))))
         (when pretty-view-links--queue
+          ;; A render may have queued documents, which scheduled a tick
+          ;; for now; the tick after this one is due 0.01 s from now.
+          (when pretty-view-links--timer
+            (cancel-timer pretty-view-links--timer)
+            (setq pretty-view-links--timer nil))
           (pretty-view-links--schedule 0.01)))
     (error
      (pretty-view-links-reset)
@@ -346,7 +351,8 @@ so it never covers a prompt."
        "pretty-view: linked documents — %d written, %d unchanged, %d failed%s"
        written unchanged failed
        (if (pretty-view-links--run-limit-hit run)
-           (format "; stopped after %d, see `pretty-view-follow-links-limit'"
+           (format (concat "; stopped after %d linked documents; "
+                          "see pretty-view-follow-links-limit")
                    pretty-view-follow-links-limit)
          "")))))
 
