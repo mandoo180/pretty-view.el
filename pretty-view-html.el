@@ -28,6 +28,7 @@
 (require 'pretty-view-theme)
 (require 'pretty-view-themes)
 (require 'pretty-view-render)
+(require 'pretty-view-browser)
 (require 'url-util)
 
 ;; Duplicated from pretty-view-render.el (`defgroup' merges harmlessly).
@@ -57,7 +58,8 @@ This is what makes the output a single self-contained file."
 
 (defcustom pretty-view-inline-image-max-bytes 2000000
   "Largest image, in bytes, that is embedded as a data URI.
-Larger files are linked with a `file://' URL instead."
+Larger files are linked with a `file://' URL the browser can open
+instead; see `pretty-view-browser-file-url'."
   :type 'integer
   :group 'pretty-view)
 
@@ -192,7 +194,8 @@ Remote URLs, unreadable files, and files over
              (concat (match-string 1 match)
                      (match-string 2 match)
                      (cond (uri uri)
-                           ((file-readable-p file) (concat "file://" file))
+                           ((file-readable-p file)
+                            (pretty-view-browser-file-url file))
                            (t src))
                      (match-string 4 match))))))
      html t)))

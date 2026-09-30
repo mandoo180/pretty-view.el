@@ -325,5 +325,20 @@ global body filter must still run alongside it."
         (should (string-match-p "<!--global-filter-->" html))
         (should (string-match-p "<!--local-filter-->" html))))))
 
+(ert-deftest pretty-view-html-test-oversized-image-uses-browser-file-url ()
+  "An image too large to embed is linked through a browser-ready URL."
+  (let* ((dir (make-temp-file "pv-assets" t))
+         (png (expand-file-name "big.png" dir))
+         (pretty-view-inline-image-max-bytes 8))
+    (unwind-protect
+        (cl-letf (((symbol-function 'pretty-view-browser-file-url)
+                   (lambda (f) (concat "URL:" f))))
+          (with-temp-file png (insert (make-string 100 ?a)))
+          (should (string-match-p
+                   (regexp-quote (concat "src=\"URL:" png "\""))
+                   (pretty-view-html--inline-assets
+                    "<img src=\"big.png\" />" dir))))
+      (delete-directory dir t))))
+
 (provide 'pretty-view-html-test)
 ;;; pretty-view-html-test.el ends here

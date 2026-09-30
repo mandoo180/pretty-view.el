@@ -29,6 +29,7 @@
 ;;; Code:
 
 (require 'seq)
+(require 'url-util)
 
 (declare-function browse-url "browse-url" (url &rest args))
 
@@ -40,9 +41,16 @@ A variable rather than a call so tests can rebind it.")
   "Cached Windows temporary directory, or `unset' if not yet computed.
 A variable rather than a call so tests can reset it.")
 
+(defvar pretty-view-browser--wsl-root-cache 'unset
+  "Cached URL prefix of the WSL root file system, or `unset'.
+Either a string such as \"//wsl.localhost/Ubuntu\", or nil when
+`wslpath' could not produce one.  A variable rather than a call so
+tests can rebind it.")
+
 (defun pretty-view-browser--reset-caches ()
   "Reset all caches for testing."
   (setq pretty-view-browser--windows-temp-cache 'unset)
+  (setq pretty-view-browser--wsl-root-cache 'unset)
   (setq pretty-view-browser--uname nil))
 
 (defun pretty-view-browser-wsl-p ()
@@ -98,6 +106,49 @@ The result is computed on first use and cached for the session."
                 (shell-command-to-string
                  (format "wslpath -w %s" (shell-quote-argument file))))))
       (unless (string-empty-p out) out))))
+
+(defun pretty-view-browser--wsl-root ()
+  "Return the URL prefix of the WSL root file system, or nil.
+It is `wslpath -w /' with slashes for backslashes and no trailing
+slash, such as \"//wsl.localhost/Ubuntu\".  The result is computed on
+first use and cached for the session."
+  (when (eq pretty-view-browser--wsl-root-cache 'unset)
+    (setq pretty-view-browser--wsl-root-cache
+          (let ((win (pretty-view-browser--windows-path "/")))
+            (and win
+                 (string-prefix-p "\\\\" win)
+                 (string-trim-right (string-replace "\\" "/" win) "/+")))))
+  pretty-view-browser--wsl-root-cache)
+
+(defun pretty-view-browser--encode-path (path)
+  "Return PATH with each segment percent-encoded and its slashes kept."
+  (mapconcat #'url-hexify-string (split-string path "/") "/"))
+
+(defun pretty-view-browser--drive-url (drive rest)
+  "Return the URL of REST, a slash-led path or nil, on Windows DRIVE."
+  (concat "file:///" (upcase drive) ":"
+          (pretty-view-browser--encode-path (or rest "/"))))
+
+(defun pretty-view-browser-file-url (file)
+  "Return a URL the browser can open for FILE, an absolute file name.
+Under WSL the browser runs on Windows, so a file on a mounted Windows
+drive becomes a drive URL and any other file a URL under the WSL root;
+see `pretty-view-browser--wsl-root'.  A Windows file name becomes a
+drive URL, and anything else a plain `file://' URL.  Every path
+segment is percent-encoded."
+  (save-match-data
+    (let ((wsl (pretty-view-browser-wsl-p)))
+      (cond
+       ((and wsl (string-match "\\`/mnt/\\([a-zA-Z]\\)\\(/.*\\)?\\'" file))
+        (pretty-view-browser--drive-url (match-string 1 file)
+                                        (match-string 2 file)))
+       ((string-match "\\`\\([a-zA-Z]\\):\\(/.*\\)?\\'" file)
+        (pretty-view-browser--drive-url (match-string 1 file)
+                                        (match-string 2 file)))
+       ((and wsl (pretty-view-browser--wsl-root))
+        (concat "file:" (pretty-view-browser--wsl-root)
+                (pretty-view-browser--encode-path file)))
+       (t (concat "file://" (pretty-view-browser--encode-path file)))))))
 
 (defcustom pretty-view-output-directory nil
   "Directory that rendered HTML is written to.

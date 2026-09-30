@@ -203,5 +203,75 @@
         (should-not (string-prefix-p "-" name))
         (should (string-match-p "\\`[[:alnum:]]" name))))))
 
+(defmacro pv-with-wsl-root (root &rest body)
+  "Run BODY under WSL with the WSL root URL prefix cached as ROOT."
+  (declare (indent 1))
+  `(let ((pretty-view-browser--wsl-root-cache ,root))
+     (pv-with-wsl t ,@body)))
+
+(ert-deftest pretty-view-browser-test-file-url-plain-path ()
+  (pv-with-wsl nil
+    (should (equal (pretty-view-browser-file-url "/tmp/a b/x.pdf")
+                   "file:///tmp/a%20b/x.pdf"))))
+
+(ert-deftest pretty-view-browser-test-file-url-encodes-each-segment ()
+  (pv-with-wsl nil
+    (should (equal (pretty-view-browser-file-url "/d/설명#1.json")
+                   "file:///d/%EC%84%A4%EB%AA%85%231.json"))))
+
+(ert-deftest pretty-view-browser-test-file-url-windows-drive ()
+  (pv-with-wsl nil
+    (should (equal (pretty-view-browser-file-url "c:/Users/u/a b.pdf")
+                   "file:///C:/Users/u/a%20b.pdf"))))
+
+(ert-deftest pretty-view-browser-test-file-url-wsl-home ()
+  (pv-with-wsl-root "//wsl.localhost/Ubuntu"
+    (should (equal (pretty-view-browser-file-url "/home/u/data.json")
+                   "file://wsl.localhost/Ubuntu/home/u/data.json"))))
+
+(ert-deftest pretty-view-browser-test-file-url-wsl-windows-drive ()
+  "A file on a mounted Windows drive needs no WSL root, and no wslpath."
+  (pv-with-wsl-root 'unset
+    (cl-letf (((symbol-function 'pretty-view-browser--windows-path)
+               (lambda (_f) (error "wslpath must not run"))))
+      (should (equal (pretty-view-browser-file-url
+                      "/mnt/c/Users/u/My Docs/a.pdf")
+                     "file:///C:/Users/u/My%20Docs/a.pdf"))
+      (should (equal (pretty-view-browser-file-url "/mnt/d")
+                     "file:///D:/")))))
+
+(ert-deftest pretty-view-browser-test-file-url-wsl-root-falls-back ()
+  "Without a WSL root the URL is the plain Linux one, as before."
+  (pv-with-wsl-root nil
+    (should (equal (pretty-view-browser-file-url "/home/u/x.json")
+                   "file:///home/u/x.json"))))
+
+(ert-deftest pretty-view-browser-test-wsl-root-from-wslpath ()
+  (let ((pretty-view-browser--wsl-root-cache 'unset)
+        (calls 0))
+    (cl-letf (((symbol-function 'pretty-view-browser--windows-path)
+               (lambda (f)
+                 (should (equal f "/"))
+                 (setq calls (1+ calls))
+                 "\\\\wsl.localhost\\Ubuntu-24.04\\")))
+      (should (equal (pretty-view-browser--wsl-root)
+                     "//wsl.localhost/Ubuntu-24.04"))
+      (should (equal (pretty-view-browser--wsl-root)
+                     "//wsl.localhost/Ubuntu-24.04"))
+      (should (= calls 1)))))
+
+(ert-deftest pretty-view-browser-test-wsl-root-rejects-garbage ()
+  (let ((pretty-view-browser--wsl-root-cache 'unset))
+    (cl-letf (((symbol-function 'pretty-view-browser--windows-path)
+               (lambda (_f) "wslpath: /: error")))
+      (should (null (pretty-view-browser--wsl-root))))))
+
+(ert-deftest pretty-view-browser-test-reset-clears-wsl-root ()
+  (let ((pretty-view-browser--wsl-root-cache "//x/y")
+        (pretty-view-browser--windows-temp-cache nil)
+        (pretty-view-browser--uname "k"))
+    (pretty-view-browser--reset-caches)
+    (should (eq pretty-view-browser--wsl-root-cache 'unset))))
+
 (provide 'pretty-view-browser-test)
 ;;; pretty-view-browser-test.el ends here
