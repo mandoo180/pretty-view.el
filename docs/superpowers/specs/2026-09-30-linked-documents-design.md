@@ -239,8 +239,10 @@ script, and a background write would silently drop the watcher.
   0 failed`, is logged. If the limit was hit, it is followed by
   `stopped after 200 linked documents; see
   pretty-view-follow-links-limit`.
-- Progress and summary are skipped while the minibuffer is active, so a
-  prompt is never overwritten. Failure messages are always logged.
+- While the minibuffer is active, progress is not shown at all, and the
+  summary and failure messages are logged to `*Messages*` with
+  `inhibit-message` bound, so a prompt is never overwritten and nothing
+  is lost.
 
 ## 8. Unchanged pages
 
@@ -280,6 +282,14 @@ Org's default.
 
 Org links with a search option (`[[file:foo.org::*Heading]]`) are
 rewritten to the document without a guaranteed fragment.
+
+`ox` gives each headline a random id (`org-export-new-reference` calls
+`random`), so exporting unchanged Org text twice gives different HTML,
+and §8 would rewrite every Org page on every run. `pretty-view-org-body`
+therefore seeds the generator with a fixed string before exporting and
+reseeds it from the system (`(random t)`) afterwards. Ids stay unique
+within a page and become stable across renders. As a side effect, a
+live-mode save of unchanged Org text no longer reloads the tab.
 
 ## 10. Customization
 
@@ -354,7 +364,7 @@ were rejected because each costs as much to write as the real page.
 | `pretty-view-links.el` (new) | Rewriting (§4), runs and queue (§7), unchanged-page table (§8), the three options (§10) |
 | `pretty-view-browser.el` | `pretty-view-browser-file-url` and its WSL prefix cache (§5) |
 | `pretty-view-html.el` | Oversized-image fallback uses the file URL (§5) |
-| `pretty-view-org.el` | `org-html-link-org-files-as-html` binding (§9) |
+| `pretty-view-org.el` | `org-html-link-org-files-as-html` binding and the seeded export (§9) |
 | `pretty-view.el` | LINKS argument, `pretty-view--render-linked` (§6), wiring into commands and live mode |
 | `README.md` | A "Linked documents" section and the new variables |
 | `2026-09-11-pretty-view-design.md` | A note on the superseded out-of-scope item |
@@ -381,7 +391,8 @@ tests call the tick function directly.
   while its links are still followed, a deleted output rewritten, a
   failure isolated, a live-mode buffer's page not written, summary
   counts, pending input deferring work.
-- **Org**: `[[file:foo.org]]` rewritten in temp output; export keeps
+- **Org**: identical HTML for unchanged text, `random` reseeded after
+  export; `[[file:foo.org]]` rewritten in temp output; export keeps
   `foo.html`.
 - **Linked render**: title, output path, and base directory match a
   `pretty-view-file` render; mode hooks do not run; the temporary
