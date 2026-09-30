@@ -48,6 +48,7 @@
 (require 'pretty-view-org)
 (require 'pretty-view-text)
 (require 'pretty-view-browser)
+(require 'pretty-view-links)
 
 (defvar pretty-view-live-mode nil
   "Minor mode variable for live rendering.")
@@ -107,36 +108,85 @@ derived from it, so an entry for `outline-mode' would silently override
   "Return the version script that FILE's live page polls."
   (concat (file-name-sans-extension file) ".live.js"))
 
-(defun pretty-view-render-buffer-to-file (file &optional live)
-  "Render the current buffer into FILE.
-LIVE non-nil embeds a watcher that reloads the page when a later
-render changes it, and writes the version script it polls; see
-`pretty-view-live-interval'.  Creates FILE's directory when it does not
-exist.  Does not open a browser."
+(defun pretty-view--render-html (&optional links)
+  "Return the current buffer rendered as a complete HTML document.
+LINKS non-nil means the page is for the output directory, so its local
+links are rewritten to work from there; see
+`pretty-view-links-rewrite'."
   (let* ((base default-directory)
          (title (pretty-view--title))
-         (body (pretty-view-body))
+         (body (let ((pretty-view-org-keep-org-links links))
+                 (pretty-view-body)))
          (suppress-toc (seq-some (lambda (mode) (derived-mode-p mode))
                                  pretty-view-own-toc-modes))
          (html (pretty-view-html-document body
                                           :title title
                                           :base-directory base
-                                          :toc (if suppress-toc 'none pretty-view-toc)))
+                                          :toc (if suppress-toc 'none pretty-view-toc))))
+    (if links
+        (pretty-view-links-rewrite html base #'pretty-view-links-accept)
+      html)))
+
+(defun pretty-view--render-linked (source)
+  "Return SOURCE, a linked document's file name, rendered as HTML.
+SOURCE is read into a temporary buffer that behaves as if it visited
+the file, so its title, base directory, and output file match a
+`pretty-view-file' render.  The major mode comes from the file name,
+but mode hooks do not run.  Links are rewritten as for any page in the
+output directory."
+  ;; Not `with-temp-buffer': Org exports a buffer whose name starts with
+  ;; a space to different headline ids than a visited file's buffer, and
+  ;; the page must equal a `pretty-view-file' render of the same file.
+  (let ((buffer (generate-new-buffer (file-name-nondirectory source) t)))
+    (unwind-protect
+        (with-current-buffer buffer
+          (insert-file-contents source)
+          (let ((create-lockfiles nil))
+            (setq buffer-file-name source
+                  default-directory (file-name-directory source))
+            (unwind-protect
+                (progn
+                  (delay-mode-hooks (set-auto-mode))
+                  (pretty-view--render-html t))
+              ;; Unmodified and nameless, the buffer dies without a prompt.
+              (set-buffer-modified-p nil)
+              (setq buffer-file-name nil))))
+      (kill-buffer buffer))))
+
+(defun pretty-view-render-buffer-to-file (file &optional live links)
+  "Render the current buffer into FILE.
+LIVE non-nil embeds a watcher that reloads the page when a later
+render changes it, and writes the version script it polls; see
+`pretty-view-live-interval'.  LINKS non-nil means FILE is in the output
+directory: local links are rewritten to work from there and, when
+`pretty-view-follow-links' is non-nil, the documents they name are
+rendered next to FILE in the background.  Creates FILE's directory
+when it does not exist.  Does not open a browser."
+  (let* ((pretty-view-links-current-run
+          (and links pretty-view-follow-links
+               (pretty-view-links-start-run buffer-file-name
+                                            #'pretty-view--render-linked)))
+         (html (pretty-view--render-html links))
          (live-file (and live pretty-view-live-interval
                          (pretty-view--live-file file)))
          (version (and live-file
                        (secure-hash 'sha1 (encode-coding-string html 'utf-8))))
+         (page (if live-file
+                   (pretty-view-html-add-live-script
+                    html version (file-name-nondirectory live-file))
+                 html))
          (coding-system-for-write 'utf-8-unix))
     (make-directory (file-name-directory file) t)
     (with-temp-file file
-      (insert (if live-file
-                  (pretty-view-html-add-live-script
-                   html version (file-name-nondirectory live-file))
-                html)))
+      (insert page))
     ;; Written after the page, so a reload always finds the new page.
     (when live-file
       (with-temp-file live-file
         (insert (pretty-view-html-live-version-script version))))
+    ;; An unsaved buffer's page does not show its file, so it must not
+    ;; count as that file's page when the file is reached by a link.
+    (when (and links (not (buffer-modified-p)))
+      (pretty-view-links-record file page))
     file))
 
 ;;;###autoload
@@ -144,7 +194,7 @@ exist.  Does not open a browser."
   "Render the current buffer to HTML and open it in a browser."
   (interactive)
   (let ((file (pretty-view-browser-output-file (pretty-view--source-name))))
-    (pretty-view-render-buffer-to-file file pretty-view-live-mode)
+    (pretty-view-render-buffer-to-file file pretty-view-live-mode t)
     (pretty-view-browser-open file)
     (message "pretty-view: %s" file)))
 
@@ -181,7 +231,7 @@ exist.  Does not open a browser."
   (setq pretty-view-theme theme)
   (let ((file (pretty-view-browser-output-file (pretty-view--source-name))))
     (when (file-exists-p file)
-      (pretty-view-render-buffer-to-file file pretty-view-live-mode)))
+      (pretty-view-render-buffer-to-file file pretty-view-live-mode t)))
   (message "pretty-view: theme is now %s" theme))
 
 (defun pretty-view--live-update ()
@@ -189,7 +239,7 @@ exist.  Does not open a browser."
   (when pretty-view-live-mode
     (condition-case err
         (pretty-view-render-buffer-to-file
-         (pretty-view-browser-output-file (pretty-view--source-name)) t)
+         (pretty-view-browser-output-file (pretty-view--source-name)) t t)
       (quit (signal 'quit nil))
       (error
        (message "pretty-view: render failed (%s: %s) — output: %s"

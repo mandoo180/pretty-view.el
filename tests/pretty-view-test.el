@@ -337,5 +337,195 @@
     (should (assq 'emacs (package-desc-reqs desc)))
     (should-not (assq 'Emacs (package-desc-reqs desc)))))
 
+;;; Linked documents
+
+(defmacro pv-with-org-tree (dir files &rest body)
+  "Bind DIR to a fresh directory holding FILES, run BODY, delete it.
+FILES is an alist (NAME . CONTENTS) with names relative to DIR.  Output
+goes to a fresh directory, the link queue and page table start empty,
+file URLs are stubbed to \"URL:\" plus the file name, and no browser
+opens."
+  (declare (indent 2))
+  `(let* ((,dir (file-name-as-directory (make-temp-file "pv-tree" t)))
+          (pretty-view-output-directory (make-temp-file "pv-out" t))
+          (pretty-view-links--queue nil)
+          (pretty-view-links--queued (make-hash-table :test #'equal))
+          (pretty-view-links--timer nil)
+          (pretty-view-links--written (make-hash-table :test #'equal)))
+     (unwind-protect
+         (cl-letf (((symbol-function 'pretty-view-browser-open) #'ignore)
+                   ((symbol-function 'pretty-view-browser-file-url)
+                    (lambda (f) (concat "URL:" f))))
+           (dolist (f ,files)
+             (let ((path (expand-file-name (car f) ,dir)))
+               (make-directory (file-name-directory path) t)
+               (with-temp-file path (insert (cdr f)))))
+           ,@body)
+       (pretty-view-links-reset)
+       (delete-directory ,dir t)
+       (delete-directory pretty-view-output-directory t))))
+
+(defun pv-tree-page (file)
+  "Return the rendered page of FILE, or nil when it was not written."
+  (let ((out (pretty-view-browser-output-file file)))
+    (and (file-exists-p out) (pv-test-read out))))
+
+(defun pv-tree-href (file)
+  "Return the href attribute that links to FILE's page."
+  (format "href=\"%s\""
+          (url-hexify-string
+           (file-name-nondirectory (pretty-view-browser-output-file file)))))
+
+(ert-deftest pretty-view-test-linked-render-matches-a-direct-render ()
+  (pv-with-org-tree dir '(("a.org" . "#+TITLE: Alpha\n* A\n"))
+    (let* ((src (expand-file-name "a.org" dir))
+           (html (pretty-view--render-linked src))
+           (opened nil))
+      (should (string-match-p "<title>Alpha</title>" html))
+      (cl-letf (((symbol-function 'pretty-view-browser-open)
+                 (lambda (f) (setq opened f))))
+        (pretty-view-file src))
+      (should (equal opened (pretty-view-browser-output-file src)))
+      (should (equal (pv-test-read opened) html)))))
+
+(ert-deftest pretty-view-test-linked-render-skips-mode-hooks ()
+  (pv-with-org-tree dir '(("a.org" . "* A\n"))
+    (let* ((ran nil)
+           (org-mode-hook (list (lambda () (setq ran t)))))
+      (pretty-view--render-linked (expand-file-name "a.org" dir))
+      (should-not ran))))
+
+(ert-deftest pretty-view-test-linked-render-resolves-links-from-its-directory ()
+  (pv-with-org-tree dir '(("sub/a.org" . "[[file:c.json][C]]\n")
+                          ("sub/c.json" . "{}"))
+    (should (string-match-p
+             (regexp-quote (concat "href=\"URL:" dir "sub/c.json\""))
+             (pretty-view--render-linked (expand-file-name "sub/a.org" dir))))))
+
+(ert-deftest pretty-view-test-linked-render-leaves-nothing-behind ()
+  (pv-with-org-tree dir '(("a.org" . "* A\n"))
+    (let ((src (expand-file-name "a.org" dir)))
+      (cl-letf (((symbol-function 'yes-or-no-p)
+                 (lambda (&rest _) (error "Prompted")))
+                ((symbol-function 'y-or-n-p)
+                 (lambda (&rest _) (error "Prompted"))))
+        (pretty-view--render-linked src))
+      (should (null (get-file-buffer src)))
+      (should (null (directory-files dir nil "\\`\\.#"))))))
+
+(ert-deftest pretty-view-test-linked-documents-render-in-the-background ()
+  (pv-with-org-tree dir
+      '(("root.org" . "* Root\n[[file:menus/a.org][A]] [[file:data.json][D]]\n")
+        ("menus/a.org" . "* A\n[[file:../root.org][Back]] [[file:b.org][B]]\n")
+        ("menus/b.org" . "* B\n")
+        ("data.json" . "{}"))
+    (let* ((root (expand-file-name "root.org" dir))
+           (a (expand-file-name "menus/a.org" dir))
+           (b (expand-file-name "menus/b.org" dir))
+           (buf (find-file-noselect root)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (pretty-view))
+            ;; The root is written at once; its links point at pages
+            ;; that the queue writes later.
+            (let ((page (pv-tree-page root)))
+              (should (string-match-p (regexp-quote (pv-tree-href a)) page))
+              (should (string-match-p
+                       (regexp-quote
+                        (format "href=\"URL:%sdata.json\" target=\"_blank\""
+                                dir))
+                       page)))
+            (should-not (pv-tree-page a))
+            (while pretty-view-links--queue (pretty-view-links--tick))
+            (let ((page (pv-tree-page a)))
+              (should (string-match-p (regexp-quote (pv-tree-href root)) page))
+              (should (string-match-p (regexp-quote (pv-tree-href b)) page)))
+            (should (pv-tree-page b)))
+        (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-export-leaves-links-alone ()
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]] [[file:c.json][C]]\n")
+                          ("b.org" . "* B\n")
+                          ("c.json" . "{}"))
+    (let ((out (expand-file-name "a.html" dir))
+          (buf (find-file-noselect (expand-file-name "a.org" dir))))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (pretty-view-export out))
+            (let ((html (pv-test-read out)))
+              (should (string-match-p "href=\"b.html\"" html))
+              (should (string-match-p "href=\"c.json\"" html))
+              (should-not (string-match-p "target=" html)))
+            (should (null pretty-view-links--queue)))
+        (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-follow-links-off-opens-documents-as-files ()
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let ((pretty-view-follow-links nil)
+          (buf (find-file-noselect (expand-file-name "a.org" dir))))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (pretty-view))
+            (should (string-match-p
+                     (regexp-quote
+                      (format "href=\"URL:%sb.org\" target=\"_blank\"" dir))
+                     (pv-tree-page (expand-file-name "a.org" dir))))
+            (should (null pretty-view-links--queue)))
+        (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-live-update-rewrites-links ()
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let* ((a (expand-file-name "a.org" dir))
+           (buf (find-file-noselect a)))
+      (unwind-protect
+          (with-current-buffer buf
+            (pretty-view-live-mode 1)
+            (pretty-view--live-update)
+            (should (string-match-p
+                     (regexp-quote (pv-tree-href (expand-file-name "b.org" dir)))
+                     (pv-tree-page a)))
+            (pretty-view-live-mode -1))
+        (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-select-theme-rewrites-links ()
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let* ((a (expand-file-name "a.org" dir))
+           (buf (find-file-noselect a))
+           (pretty-view-theme 'github-light))
+      (unwind-protect
+          (with-current-buffer buf
+            (pretty-view)
+            (pretty-view-select-theme 'nord)
+            (should (string-match-p
+                     (regexp-quote (pv-tree-href (expand-file-name "b.org" dir)))
+                     (pv-tree-page a))))
+        (kill-buffer buf)))))
+
+(ert-deftest pretty-view-test-unsaved-buffer-page-is-not-recorded ()
+  "Review focus: an unsaved root still gets working links, but its page
+must not pass for its file's page when the file is later reached."
+  (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let* ((a (expand-file-name "a.org" dir))
+           (out (pretty-view-browser-output-file a))
+           (buf (find-file-noselect a)))
+      (unwind-protect
+          (with-current-buffer buf
+            (pretty-view)
+            (should (gethash out pretty-view-links--written))
+            (clrhash pretty-view-links--written)
+            (goto-char (point-max))
+            (insert "Unsaved.\n")
+            (pretty-view)
+            (should (string-match-p
+                     (regexp-quote (pv-tree-href (expand-file-name "b.org" dir)))
+                     (pv-tree-page a)))
+            (should-not (gethash out pretty-view-links--written))
+            (set-buffer-modified-p nil))
+        (kill-buffer buf)))))
+
 (provide 'pretty-view-test)
 ;;; pretty-view-test.el ends here

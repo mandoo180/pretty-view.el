@@ -29,6 +29,12 @@
 (require 'ox-html)
 (require 'pretty-view-render)
 
+(defvar pretty-view-org-keep-org-links nil
+  "Non-nil makes links to Org files keep their `.org' extension.
+`ox-html' otherwise changes them to `.html', naming a file that does
+not exist.  `pretty-view-render-buffer-to-file' binds this while it
+rewrites links, so each link still names the source to render.")
+
 (defun pretty-view-org-src-block (src-block _contents info)
   "Transcode SRC-BLOCK to HTML using the package's own highlighter.
 INFO is the export communication channel."
@@ -109,17 +115,29 @@ Subscripts, superscripts, and other markup are reconstructed as Org syntax."
                 (substring-no-properties (string-trim text))))))))))
 
 (defun pretty-view-org-body ()
-  "Return the current Org buffer exported to an HTML body."
+  "Return the current Org buffer exported to an HTML body.
+The same text always exports to the same HTML, headline ids included."
   (condition-case err
       (let ((org-html-head-include-default-style nil)
             (org-html-head-include-scripts nil)
             (org-html-htmlize-output-type nil)
             (org-export-with-smart-quotes t)
+            (org-html-link-org-files-as-html
+             (and (not pretty-view-org-keep-org-links)
+                  org-html-link-org-files-as-html))
             ;; A single broken link must not abort the whole export (and
             ;; thus replace the entire document with a `.pv-error' box in
             ;; live mode); mark it in place and keep exporting instead.
             (org-export-with-broken-links 'mark))
-        (org-export-as (pretty-view-org--backend) nil nil t nil))
+        ;; `ox' draws headline ids from `random' (see
+        ;; `org-export-new-reference'); a fixed seed makes unchanged text
+        ;; export to identical HTML, so an unchanged page is not
+        ;; rewritten.  Reseeding afterwards keeps `random' unpredictable.
+        (unwind-protect
+            (progn
+              (random "pretty-view")
+              (org-export-as (pretty-view-org--backend) nil nil t nil))
+          (random t)))
     (error
      (format "<div class=\"pv-error\"><strong>Org export failed:</strong> %s</div>\n"
              (pretty-view-escape-html (error-message-string err))))))

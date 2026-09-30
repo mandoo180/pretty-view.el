@@ -165,5 +165,22 @@
     (should (string-match-p "After" html))
     (should (string-match-p "Some text after" html))))
 
+(ert-deftest pretty-view-org-test-org-links-keep-their-extension-on-request ()
+  (should (string-match-p "href=\"foo.html\"" (pv-org "[[file:foo.org][F]]\n")))
+  (let ((pretty-view-org-keep-org-links t))
+    (should (string-match-p "href=\"foo.org\""
+                            (pv-org "[[file:foo.org][F]]\n")))))
+
+(ert-deftest pretty-view-org-test-export-is-deterministic ()
+  "Unchanged text must export to identical HTML, headline ids included."
+  (should (equal (pv-org "* A\n** B\n") (pv-org "* A\n** B\n"))))
+
+(ert-deftest pretty-view-org-test-export-reseeds-random ()
+  "The fixed seed must not leak: `random' is unpredictable afterwards."
+  (pv-org "* A\n")
+  (let ((first (random most-positive-fixnum)))
+    (pv-org "* A\n")
+    (should-not (equal first (random most-positive-fixnum)))))
+
 (provide 'pretty-view-org-test)
 ;;; pretty-view-org-test.el ends here
