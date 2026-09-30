@@ -38,7 +38,8 @@ no network access.
 - An HTTP server
 - Cursor-to-scroll synchronization between Emacs and the browser
 - PDF export
-- Multi-file site generation
+- Multi-file site generation (the linked-documents subset is brought in
+  by `2026-09-30-linked-documents-design.md`)
 - Bundled Mermaid, KaTeX, or MathJax — hook points only
 
 ## 3. Architecture
