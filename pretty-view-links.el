@@ -180,6 +180,7 @@ BASE-DIRECTORY is remote.  A link that cannot be resolved is left alone."
                (:copier nil))
   "One render's walk over the documents it links to, and its tallies."
   (render nil)
+  (keep-rendered nil)
   (visited (make-hash-table :test #'equal))
   (count 0)
   (limit-hit nil)
@@ -205,28 +206,36 @@ Each entry is a list (SOURCE OUTPUT RUN).")
 (defvar pretty-view-links--written (make-hash-table :test #'equal)
   "Map an output file to the SHA-1 of the HTML last written to it.")
 
-(defun pretty-view-links-start-run (root render)
+(defun pretty-view-links-start-run (root render &optional keep-rendered)
   "Return a new run for ROOT that renders linked documents with RENDER.
 ROOT is the rendered document's absolute file name, or nil when it has
 none.  RENDER is called with a linked document's absolute file name
 while `pretty-view-links-current-run' is bound to the run, and returns
-the document's HTML."
-  (let ((run (pretty-view-links--make-run :render render)))
+the document's HTML.  KEEP-RENDERED non-nil makes the run link to a
+document whose page already exists without rendering it again; see
+`pretty-view-links-accept'."
+  (let ((run (pretty-view-links--make-run :render render
+                                          :keep-rendered keep-rendered)))
     (when root
       (puthash root t (pretty-view-links--run-visited run)))
     run))
 
 (defun pretty-view-links-accept (source)
   "Return the output file to link SOURCE to, queueing SOURCE when new.
-SOURCE is a linked document's absolute file name.  Return nil when no
-run is current, or when the current run has already accepted
-`pretty-view-follow-links-limit' documents."
+SOURCE is a linked document's absolute file name.  A run started to
+keep rendered pages does not queue SOURCE when its page exists.  Return
+nil when no run is current, or when the current run has already
+accepted `pretty-view-follow-links-limit' documents."
   (let ((run pretty-view-links-current-run))
     (when run
       (let ((visited (pretty-view-links--run-visited run))
             (output (pretty-view-browser-output-file source)))
         (cond
          ((gethash source visited) output)
+         ((and (pretty-view-links--run-keep-rendered run)
+               (file-exists-p output))
+          (puthash source t visited)
+          output)
          ((>= (pretty-view-links--run-count run)
               pretty-view-follow-links-limit)
           (setf (pretty-view-links--run-limit-hit run) t)

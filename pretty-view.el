@@ -157,19 +157,22 @@ output directory.  Org Babel blocks are not evaluated."
               (setq buffer-file-name nil))))
       (kill-buffer buffer))))
 
-(defun pretty-view-render-buffer-to-file (file &optional live links)
+(defun pretty-view-render-buffer-to-file (file &optional live links keep-rendered)
   "Render the current buffer into FILE.
 LIVE non-nil embeds a watcher that reloads the page when a later
 render changes it, and writes the version script it polls; see
 `pretty-view-live-interval'.  LINKS non-nil means FILE is in the output
 directory: local links are rewritten to work from there and, when
 `pretty-view-follow-links' is non-nil, the documents they name are
-rendered next to FILE in the background.  Creates FILE's directory
+rendered next to FILE in the background.  KEEP-RENDERED non-nil leaves
+alone each linked document whose page already exists: the link points
+at that page, which is not rendered again.  Creates FILE's directory
 when it does not exist.  Does not open a browser."
   (let* ((pretty-view-links-current-run
           (and links pretty-view-follow-links
                (pretty-view-links-start-run buffer-file-name
-                                            #'pretty-view--render-linked)))
+                                            #'pretty-view--render-linked
+                                            keep-rendered)))
          (html (pretty-view--render-html links))
          (live-file (and live pretty-view-live-interval
                          (pretty-view--live-file file)))
@@ -257,14 +260,19 @@ long, so a burst of changes costs one render."
     (cancel-timer pretty-view--live-timer))
   (setq pretty-view--live-timer nil))
 
-(defun pretty-view--live-update ()
+(defun pretty-view--live-update (&optional debounced)
   "Regenerate this buffer's rendered file.  Used by `pretty-view-live-mode'.
-Any pending debounced render is dropped, since this one supersedes it."
+Any pending debounced render is dropped, since this one supersedes it.
+DEBOUNCED non-nil, for the render of unsaved edits, does not render
+again the linked documents whose pages exist: one such render follows
+each pause in typing, and an edit here does not change them.  A save
+or a revert follows every link."
   (pretty-view--live-cancel)
   (when pretty-view-live-mode
     (condition-case err
         (pretty-view-render-buffer-to-file
-         (pretty-view-browser-output-file (pretty-view--source-name)) t t)
+         (pretty-view-browser-output-file (pretty-view--source-name)) t t
+         debounced)
       (quit (signal 'quit nil))
       (error
        (message "pretty-view: render failed (%s: %s) — output: %s"
@@ -277,7 +285,7 @@ Any pending debounced render is dropped, since this one supersedes it."
     (with-current-buffer buffer
       (setq pretty-view--live-timer nil)
       (when pretty-view-live-mode
-        (pretty-view--live-update)))))
+        (pretty-view--live-update t)))))
 
 (defun pretty-view--live-schedule (&rest _)
   "Arrange a render `pretty-view-live-delay' seconds after the last change.

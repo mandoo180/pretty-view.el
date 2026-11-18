@@ -522,6 +522,40 @@ opens."
             (should (pv-tree-page b)))
         (kill-buffer buf)))))
 
+(ert-deftest pretty-view-test-debounced-render-keeps-rendered-linked-pages ()
+  "An unsaved edit re-renders the root, not the pages it links to.
+A linked document whose page already exists is linked to but not
+rendered again by the debounced render; a save follows every link."
+  (pv-with-org-tree dir '(("a.org" . "* A\n[[file:b.org][B]]\n")
+                          ("b.org" . "* B\n"))
+    (let* ((a (expand-file-name "a.org" dir))
+           (b (expand-file-name "b.org" dir))
+           (b-page (pretty-view-browser-output-file b))
+           (pretty-view-live-delay 0.05)
+           (log nil)
+           (buf (find-file-noselect a)))
+      (unwind-protect
+          (with-current-buffer buf
+            (make-directory (file-name-directory b-page) t)
+            (with-temp-file b-page (insert "OLD PAGE"))
+            (pretty-view-live-mode 1)
+            (goto-char (point-max))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args) (push (apply #'format fmt args) log))))
+              (insert "typed words\n")
+              (pv-test-wait 0.2))
+            (should (string-match-p "typed words" (pv-tree-page a)))
+            (should (string-match-p (regexp-quote (pv-tree-href b)) (pv-tree-page a)))
+            (should (null pretty-view-links--queue))
+            (should (equal "OLD PAGE" (pv-tree-page b)))
+            (should-not (seq-find (lambda (m) (string-match-p "linked documents" m)) log))
+            (save-buffer)
+            (should pretty-view-links--queue)
+            (while pretty-view-links--queue (pretty-view-links--tick))
+            (should (string-match-p "<h2" (pv-tree-page b))))
+        (with-current-buffer buf (set-buffer-modified-p nil))
+        (kill-buffer buf)))))
+
 (ert-deftest pretty-view-test-export-leaves-links-alone ()
   (pv-with-org-tree dir '(("a.org" . "[[file:b.org][B]] [[file:c.json][C]]\n")
                           ("b.org" . "* B\n")

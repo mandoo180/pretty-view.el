@@ -306,6 +306,25 @@ rewriting would, and returns the resulting links as the page's HTML."
    (should (null (pretty-view-links-accept "/s/a.md")))
    (should (null pretty-view-links--queue))))
 
+(ert-deftest pretty-view-links-test-keep-rendered-run-skips-existing-pages ()
+  "A run made to keep rendered pages links to them without queueing."
+  (pv-queue-test
+   (let ((a-page (pretty-view-browser-output-file "/s/a.md")))
+     (with-temp-file a-page (insert "A PAGE"))
+     (let ((pretty-view-links-current-run
+            (pretty-view-links-start-run "/s/root.md" #'ignore t)))
+       (should (equal a-page (pretty-view-links-accept "/s/a.md")))
+       (should (equal (pretty-view-browser-output-file "/s/b.md")
+                      (pretty-view-links-accept "/s/b.md")))
+       (should (equal '("/s/b.md") (mapcar #'car pretty-view-links--queue)))
+       (should (= 1 (pretty-view-links--run-count pretty-view-links-current-run))))
+     ;; A run that does not keep them queues the existing page too.
+     (pretty-view-links-reset)
+     (let ((pretty-view-links-current-run
+            (pretty-view-links-start-run "/s/root.md" #'ignore)))
+       (pretty-view-links-accept "/s/a.md")
+       (should (equal '("/s/a.md") (mapcar #'car pretty-view-links--queue)))))))
+
 (ert-deftest pretty-view-links-test-queue-renders-breadth-first ()
   (pv-queue-test
    (pv-queue-start "/s/root.md" '(("/s/root.md" "/s/a.md" "/s/b.md")
