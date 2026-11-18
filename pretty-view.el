@@ -19,7 +19,7 @@
 
 ;; `M-x pretty-view' renders the current Org, Markdown, or plain-text
 ;; buffer to a self-contained HTML file and opens it in the operating
-;; system's browser.  `M-x pretty-view-live-mode' regenerates on every
+;; system's browser.  `M-x pretty-view-live-mode' regenerates after every
 ;; save, and the browser tab reloads only when the output changed.
 ;;
 ;; Everything is replaceable: `pretty-view-theme' picks the look,
@@ -241,8 +241,26 @@ when it does not exist.  Does not open a browser."
       (pretty-view-render-buffer-to-file file pretty-view-live-mode t)))
   (message "pretty-view: theme is now %s" theme))
 
+(defcustom pretty-view-live-delay 0.5
+  "Seconds `pretty-view-live-mode' waits after the last edit before rendering.
+Unsaved edits re-render once typing (or an agent's edits) pauses for this
+long, so a burst of changes costs one render."
+  :type 'number
+  :group 'pretty-view)
+
+(defvar-local pretty-view--live-timer nil
+  "Pending debounce timer of `pretty-view-live-mode' in this buffer.")
+
+(defun pretty-view--live-cancel ()
+  "Cancel this buffer's pending live render, if any."
+  (when (timerp pretty-view--live-timer)
+    (cancel-timer pretty-view--live-timer))
+  (setq pretty-view--live-timer nil))
+
 (defun pretty-view--live-update ()
-  "Regenerate this buffer's rendered file.  Used by `pretty-view-live-mode'."
+  "Regenerate this buffer's rendered file.  Used by `pretty-view-live-mode'.
+Any pending debounced render is dropped, since this one supersedes it."
+  (pretty-view--live-cancel)
   (when pretty-view-live-mode
     (condition-case err
         (pretty-view-render-buffer-to-file
@@ -253,17 +271,46 @@ when it does not exist.  Does not open a browser."
                 (car err) (cadr err)
                 (pretty-view-browser-output-file (pretty-view--source-name)))))))
 
+(defun pretty-view--live-fire (buffer)
+  "Render BUFFER if it is live and still in `pretty-view-live-mode'."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq pretty-view--live-timer nil)
+      (when pretty-view-live-mode
+        (pretty-view--live-update)))))
+
+(defun pretty-view--live-schedule (&rest _)
+  "Arrange a render `pretty-view-live-delay' seconds after the last change.
+Meant for `after-change-functions'; it only re-arms a timer, so typing
+stays fast.  A plain timer rather than an idle one: edits that arrive
+through a server while the user is idle would never fire an idle timer
+whose idle period had already begun."
+  (pretty-view--live-cancel)
+  (setq pretty-view--live-timer
+        (run-with-timer pretty-view-live-delay nil
+                        #'pretty-view--live-fire (current-buffer))))
+
 ;;;###autoload
 (define-minor-mode pretty-view-live-mode
-  "Regenerate this buffer's rendered HTML on every save.
-The rendered page checks every `pretty-view-live-interval' seconds
-whether a save changed it, and only then reloads, restoring the
-scroll position."
+  "Regenerate this buffer's rendered HTML as its text changes.
+A save or a revert (including auto-revert after the file changed on
+disk) renders at once.  Unsaved edits render `pretty-view-live-delay'
+seconds after the last change.  The rendered page checks every
+`pretty-view-live-interval' seconds whether the output changed, and
+only then reloads, restoring the scroll position."
   :lighter " PV"
   :group 'pretty-view
   (if pretty-view-live-mode
-      (add-hook 'after-save-hook #'pretty-view--live-update nil t)
-    (remove-hook 'after-save-hook #'pretty-view--live-update t)))
+      (progn
+        (add-hook 'after-save-hook #'pretty-view--live-update nil t)
+        (add-hook 'after-revert-hook #'pretty-view--live-update nil t)
+        (add-hook 'after-change-functions #'pretty-view--live-schedule nil t)
+        (add-hook 'kill-buffer-hook #'pretty-view--live-cancel nil t))
+    (remove-hook 'after-save-hook #'pretty-view--live-update t)
+    (remove-hook 'after-revert-hook #'pretty-view--live-update t)
+    (remove-hook 'after-change-functions #'pretty-view--live-schedule t)
+    (remove-hook 'kill-buffer-hook #'pretty-view--live-cancel t)
+    (pretty-view--live-cancel)))
 
 (provide 'pretty-view)
 ;;; pretty-view.el ends here

@@ -34,7 +34,7 @@ The package requires Emacs 29.1 and has no external dependencies beyond built-in
 | `pretty-view` | Render the current buffer and open it in the browser |
 | `pretty-view-file` | Prompt for a file, render it, and open it in the browser |
 | `pretty-view-export` | Render the current buffer to a file path you specify (no browser) |
-| `pretty-view-live-mode` | Regenerate on every save; the browser tab reloads only when the output changed |
+| `pretty-view-live-mode` | Regenerate on save, revert, and (after a short pause) unsaved edits; the browser tab reloads only when the output changed |
 | `pretty-view-select-theme` | Choose a theme interactively; updates the display if already rendered |
 
 On an unsaved buffer, `pretty-view` uses the buffer text and names the output after the buffer. On a file, it renders the file content and can regenerate it on subsequent saves via `pretty-view-live-mode`.
@@ -271,6 +271,7 @@ In addition to the extension points above, the following variables control the p
 |----------|---------|-------------|
 | `pretty-view-allow-raw-html` | `t` | Markdown only: when non-nil, pass raw HTML blocks through unchanged; when nil, escape them. Org's `#+BEGIN_EXPORT html` blocks are governed by Org's own export settings, not by this variable. See Threat Model section |
 | `pretty-view-text-as-markdown` | nil | When non-nil, route plain-text files through the Markdown parser instead of the plain-text converter |
+| `pretty-view-live-delay` | 0.5 | Seconds after the last edit before `pretty-view-live-mode` renders unsaved changes |
 | `pretty-view-live-interval` | 1.5 | Seconds between change checks in `pretty-view-live-mode`; nil disables auto-reload |
 
 ### Code and Syntax Highlighting
@@ -317,11 +318,11 @@ On WSL, the resolution order is: `wslview` if installed; then `explorer.exe` wit
 
 ## Live Mode
 
-Enable `pretty-view-live-mode` in a buffer to regenerate the rendered HTML on every save. The browser tab reloads only when a save actually changed the output, and keeps its scroll position (via `sessionStorage`). Edit in Emacs, save, and the tab catches up; leave it idle and it stays put.
+Enable `pretty-view-live-mode` in a buffer to regenerate the rendered HTML as the text changes. A save or a revert renders at once, so a file rewritten on disk by another program (and auto-reverted) is picked up too. Unsaved edits render `pretty-view-live-delay` seconds (default 0.5) after the last change, so a burst of edits costs one render; this also covers edits made through a server connection. The browser tab reloads only when the output actually changed, and keeps its scroll position (via `sessionStorage`). Leave the buffer idle and the tab stays put.
 
 A `file://` page cannot fetch anything, so it cannot read its own source to see whether it changed. It can still load a script, so each live render writes a one-line version script next to the page (`<name>.live.js`, holding a hash of the rendered HTML). The page loads that script every `pretty-view-live-interval` seconds (default 1.5), skipping hidden tabs, and reloads only when the reported version differs from its own.
 
-To disable automatic reloads entirely, set `pretty-view-live-interval` to nil. The file will still regenerate on save, but the page carries no watcher.
+To disable automatic reloads entirely, set `pretty-view-live-interval` to nil. The file will still regenerate, but the page carries no watcher.
 
 ## Linked Documents
 

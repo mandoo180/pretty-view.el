@@ -106,6 +106,85 @@
     (pretty-view-live-mode -1)
     (should-not (memq #'pretty-view--live-update after-save-hook))))
 
+;; Live refresh after revert and unsaved edits.
+
+(defmacro pv-with-live-file (&rest body)
+  "Run BODY in a live-mode buffer visiting a temp file; `renders' counts renders."
+  (declare (indent 0))
+  `(let ((file (make-temp-file "pv-live" nil ".txt" "one\n"))
+         (renders 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'pretty-view-render-buffer-to-file)
+                    (lambda (&rest _) (cl-incf renders))))
+           (let ((buf (find-file-noselect file)))
+             (unwind-protect
+                 (with-current-buffer buf
+                   (pretty-view-live-mode 1)
+                   ,@body)
+               (when (buffer-live-p buf)
+                 (with-current-buffer buf (set-buffer-modified-p nil))
+                 (kill-buffer buf)))))
+       (delete-file file))))
+
+(defun pv-test-wait (seconds)
+  "Let timers run for SECONDS."
+  (let ((end (+ (float-time) seconds)))
+    (while (< (float-time) end)
+      (accept-process-output nil 0.01))))
+
+(ert-deftest pretty-view/live-mode-renders-after-revert ()
+  (pv-with-live-file
+    (let ((pretty-view-live-delay 0.05))
+      (with-temp-file file (insert "two\n"))
+      (revert-buffer t t t)
+      (should (= renders 1))
+      (should pretty-view-live-mode)
+      (should (memq #'pretty-view--live-schedule after-change-functions))
+      (pv-test-wait 0.15)
+      (should (= renders 1)))))
+
+(ert-deftest pretty-view/live-mode-renders-unsaved-edits-after-the-delay ()
+  (pv-with-live-file
+    (let ((pretty-view-live-delay 0.05))
+      (insert "a")
+      (should (= renders 0))
+      (pv-test-wait 0.15)
+      (should (= renders 1))
+      (insert "b")
+      (insert "c")
+      (insert "d")
+      (should (= renders 1))
+      (pv-test-wait 0.15)
+      (should (= renders 2)))))
+
+(ert-deftest pretty-view/live-mode-off-cancels-the-timer-and-hooks ()
+  (pv-with-live-file
+    (let ((pretty-view-live-delay 0.05))
+      (insert "a")
+      (should (timerp pretty-view--live-timer))
+      (pretty-view-live-mode -1)
+      (should-not pretty-view--live-timer)
+      (dolist (hook '(after-save-hook after-revert-hook
+                      after-change-functions kill-buffer-hook))
+        (should-not (memq #'pretty-view--live-update (symbol-value hook)))
+        (should-not (memq #'pretty-view--live-schedule (symbol-value hook)))
+        (should-not (memq #'pretty-view--live-cancel (symbol-value hook))))
+      (pv-test-wait 0.15)
+      (should (= renders 0)))))
+
+(ert-deftest pretty-view/killing-the-buffer-cancels-the-timer ()
+  (pv-with-live-file
+    (let ((pretty-view-live-delay 0.05)
+          (timer nil))
+      (insert "a")
+      (setq timer pretty-view--live-timer)
+      (should (memq timer timer-list))
+      (set-buffer-modified-p nil)
+      (kill-buffer (current-buffer))
+      (should-not (memq timer timer-list))
+      (pv-test-wait 0.15)
+      (should (= renders 0)))))
+
 (defun pv-test-read (file)
   "Return FILE's contents."
   (with-temp-buffer
